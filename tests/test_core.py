@@ -378,4 +378,7 @@ def test_position_cannot_run_ahead_of_kickoff():
     c.max_elapsed, c.max_at, c.halftime_done = 2238, t, True  # a bad position saved earlier
     feed(c, 1, 202, t + 4, 10)  # the real game: Q1 3:22
     assert c.max_elapsed < 900 and not c.halftime_done
+    c.halftime_done = True  # a bad flag that survived (the position was plausible by then)
+    feed(c, 1, 190, t + 20, 6)
+    assert not c.halftime_done
     assert c.live(t + 12) and c.display.startswith("Q1")

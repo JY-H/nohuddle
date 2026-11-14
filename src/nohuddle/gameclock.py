@@ -364,6 +364,8 @@ class GameClock:
         for w in r.words:
             self.team_counts[w] = self.team_counts.get(w, 0) + 1
         self.team_readings += 1
+        if r.quarter is not None and r.quarter <= 2 and self.halftime_done:
+            self.halftime_done = False  # still in the first half: whatever said otherwise was wrong
         if r.quarter == 2 and r.clock == 0:
             self._start_halftime(t, by_clock=True)
         elif r.quarter is not None and r.quarter >= 3:
