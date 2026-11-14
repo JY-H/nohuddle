@@ -400,7 +400,7 @@ class Controller:
             self.pinned = None
         if not self.auto and self.active in self.priority:
             return
-        new = scheduler.choose(self.priority, states, self.pinned)
+        new = scheduler.choose(self.priority, self._showable(), self.pinned)
         if new != self.active:
             old = self.active
             self.active = new
@@ -426,13 +426,18 @@ class Controller:
 
     # ---------- HTTP API ----------
 
+    def _showable(self) -> set[str]:
+        now = time.time()
+        return {g for g in self.priority if self.watched[g].detector.showable(now)}
+
     def _visible(self) -> list[str]:
         """Games on screen, in display order: the active game first. Breaks are never shown."""
         if self.active is None:
             return []
         if self.mode == "single":
             return [self.active]
-        rest = [g for g in self.priority if g != self.active and self.watched[g].detector.state in scheduler.WATCHABLE]
+        showable = self._showable()
+        rest = [g for g in self.priority if g != self.active and g in showable]
         return [self.active] + rest
 
     def _state_json(self) -> dict:

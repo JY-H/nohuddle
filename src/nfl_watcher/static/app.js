@@ -21,7 +21,7 @@ function badge(g, now) {
     return `<span class="badge break" title="${esc(g.detail)}">${what} ${fmtDur(now - g.since)}</span>`;
   }
   if (g.state === 'stalled') return '<span class="badge stalled">NOT PLAYING</span>';
-  if (g.state === 'learning') return '<span class="badge learning">LEARNING</span>';
+  if (g.state === 'learning') return '<span class="badge learning" title="Hidden until its scorebug confirms live play">CHECKING</span>';
   return `<span class="badge live">LIVE</span>${g.laggy ? ' <span class="badge laggy">LAGGY</span>' : ''}`;
 }
 
@@ -104,9 +104,11 @@ function renderStage() {
   if (empty) {
     const solo = state.games.length === 1 ? state.games[0] : null;
     const why = solo && { halftime: 'Halftime', highlight: 'Showing highlights', 'other game': 'Showing another game' }[solo.detail];
-    $('#empty-title').textContent = solo ? `${why || 'Commercial break'} · ${fmtDur(state.now - solo.since)}` : 'All games on break';
-    $('#empty-sub').textContent = solo
-      ? `${solo.title} is muted and hidden until it's back${solo.detail === 'halftime' ? ' for the 3rd quarter' : ''}.`
+    $('#empty-title').textContent = solo?.state === 'learning' ? 'Getting a read on the broadcast…'
+      : solo ? `${why || 'Commercial break'} · ${fmtDur(state.now - solo.since)}` : 'All games on break';
+    $('#empty-sub').textContent = solo?.state === 'learning'
+      ? `${solo.title} is shown as soon as its scorebug confirms live play.`
+      : solo ? `${solo.title} is muted and hidden until it's back${solo.detail === 'halftime' ? ' for the 3rd quarter' : ''}.`
       : 'Muted. Switching back as soon as one returns.';
     $('#empty-list').innerHTML = solo ? '' : state.games.map((g) => `<li>${esc(g.title)} ${badge(g, state.now)}</li>`).join('');
   }

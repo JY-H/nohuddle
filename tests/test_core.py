@@ -108,10 +108,26 @@ def test_override_sticks_while_learning():
 
 def test_scheduler_prefers_priority_and_never_shows_breaks():
     p = ["a", "b", "c"]
-    assert scheduler.choose(p, {"a": State.LIVE, "b": State.LIVE}, None) == "a"
-    assert scheduler.choose(p, {"a": State.BREAK, "b": State.STALLED, "c": State.LIVE}, None) == "c"
-    assert scheduler.choose(p, {"a": State.BREAK, "b": State.BREAK, "c": State.BREAK}, None) is None
-    assert scheduler.choose(p, {"a": State.LIVE}, "c") == "c"
+    assert scheduler.choose(p, {"a", "b"}, None) == "a"
+    assert scheduler.choose(p, {"c"}, None) == "c"
+    assert scheduler.choose(p, set(), None) is None  # everything on a break or unconfirmed
+    assert scheduler.choose(p, {"a"}, "c") == "c"
+
+
+def test_learning_games_are_hidden_until_confirmed(monkeypatch):
+    shown = {"text": []}
+    monkeypatch.setattr(gameclock, "read_text", lambda frame: shown["text"])
+    readable = BreakDetector(read_clock=True)
+    run(readable, broadcast, 0, 4)
+    assert readable.state == State.LEARNING and not readable.showable(4)
+    shown["text"] = texts("DUKE", "2ND 5:00", "MIAMI")
+    run(readable, broadcast, 4, 10)
+    assert readable.showable(10)  # first good readings
+    unreadable = BreakDetector(read_clock=False)
+    run(unreadable, broadcast, 0, 30)
+    assert not unreadable.showable(30)
+    run(unreadable, broadcast, 30, 50)
+    assert unreadable.showable(50)  # can't confirm it, so after the grace period show it anyway
 
 
 def test_health_lag_and_stall():

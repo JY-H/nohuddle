@@ -78,6 +78,9 @@ class DetectorSettings:
     # While learning, no clock reading for this long (on a readable scorebug) means it's off: hidden.
     # Some scorebugs only read cleanly every few frames, so not too tight.
     learning_clock_window: float = 12.0
+    # A game still learning is hidden (it could be mid-ad) until its scorebug confirms live play.
+    # If its scorebug can't be read at all, show it anyway after this long - better than never.
+    unverified_grace: float = 45.0
 
 
 def preprocess(frame_bgr: np.ndarray) -> np.ndarray:
@@ -148,6 +151,7 @@ class BreakDetector:
         self.network_votes: Counter = Counter()  # network names read off the screen
         self._from_network = False  # current model came from the library, not this game
         self._network_hits: dict[str, tuple[float, int]] = {}
+        self._first_seen: float | None = None
         self.clock = GameClock(clock_settings)
         self.read_clock = read_clock
         self._last_read = -1e9
@@ -176,7 +180,17 @@ class BreakDetector:
         self.model = OverlayModel(persistence, self.s)
         self._primary_seen_at = t
 
+    def showable(self, t: float) -> bool:
+        """Can this game be put on screen right now?"""
+        if self.state == State.LIVE:
+            return True
+        if self.state != State.LEARNING or self.clock.readable or self._first_seen is None:
+            return False
+        return t - max(self.since, self._first_seen) >= self.s.unverified_grace
+
     def observe(self, frame_bgr: np.ndarray, t: float) -> State:
+        if self._first_seen is None:
+            self._first_seen = t
         grey = preprocess(frame_bgr)
         learned = self.model is not None and bool(self.model.regions)
         # While learning, a readable scorebug that hasn't been read for a while means we're probably
