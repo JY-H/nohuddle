@@ -497,7 +497,7 @@ wheels = [
 ]
 
 [[package]]
-name = "nfl-watcher"
+name = "nohuddle"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

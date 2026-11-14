@@ -9,7 +9,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from nfl_watcher.detector import BreakDetector, preprocess
+from nohuddle.detector import BreakDetector, preprocess
 
 d, until, out, times = Path(sys.argv[1]), float(sys.argv[2]), sys.argv[3], [int(x) for x in sys.argv[4:]]
 det = BreakDetector()

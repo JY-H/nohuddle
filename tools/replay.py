@@ -12,7 +12,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from nfl_watcher.detector import BreakDetector, State
+from nohuddle.detector import BreakDetector, State
 
 COLORS = {State.LIVE: (80, 200, 60), State.BREAK: (0, 160, 255), State.LEARNING: (255, 140, 60), State.STALLED: (60, 60, 230)}
 

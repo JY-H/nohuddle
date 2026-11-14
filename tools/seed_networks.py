@@ -14,10 +14,10 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from nfl_watcher import gameclock
-from nfl_watcher.app import CONFIG_DIR
-from nfl_watcher.detector import DetectorSettings, OverlayModel, edges, preprocess
-from nfl_watcher.networks import NetworkLibrary, similarity
+from nohuddle import gameclock
+from nohuddle.app import CONFIG_DIR
+from nohuddle.detector import DetectorSettings, OverlayModel, edges, preprocess
+from nohuddle.networks import NetworkLibrary, similarity
 
 
 def main() -> None:

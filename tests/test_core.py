@@ -1,11 +1,11 @@
 import cv2
 import numpy as np
 
-from nfl_watcher import gameclock, scheduler
-from nfl_watcher.detector import BreakDetector, State
-from nfl_watcher.gameclock import GameClock, Reading, Text, parse
-from nfl_watcher.health import PlaybackHealth
-from nfl_watcher.streams import deobfuscate
+from nohuddle import gameclock, scheduler
+from nohuddle.detector import BreakDetector, State
+from nohuddle.gameclock import GameClock, Reading, Text, parse
+from nohuddle.health import PlaybackHealth
+from nohuddle.streams import deobfuscate
 
 rng = np.random.default_rng(0)
 
@@ -291,8 +291,8 @@ def test_misread_quarter_on_the_running_clock_is_corrected():
 
 
 def test_known_network_gives_new_games_a_head_start(tmp_path):
-    from nfl_watcher.detector import DetectorSettings
-    from nfl_watcher.networks import NetworkLibrary
+    from nohuddle.detector import DetectorSettings
+    from nohuddle.networks import NetworkLibrary
 
     settings = DetectorSettings()
     first = BreakDetector(settings, read_clock=False)
@@ -308,8 +308,8 @@ def test_known_network_gives_new_games_a_head_start(tmp_path):
 
 
 def test_library_keeps_different_networks_apart(tmp_path):
-    from nfl_watcher.detector import DetectorSettings
-    from nfl_watcher.networks import NetworkLibrary
+    from nohuddle.detector import DetectorSettings
+    from nohuddle.networks import NetworkLibrary
 
     settings = DetectorSettings()
     library = NetworkLibrary(tmp_path, settings)

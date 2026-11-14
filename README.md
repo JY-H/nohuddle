@@ -1,10 +1,10 @@
-# nfl-watcher
+# No Huddle
 
 Watch several games at once and never sit through a commercial. Pick your games, put them in priority order, and the app shows the highest-priority game that isn't on a break, switching back to your main game the moment it returns.
 
 ```
-uv run nfl-watcher            # opens a Chrome window with the multiview + control panel
-uv run nfl-watcher --league cfb --site https://<stream site>   # remembered after the first run
+uv run nohuddle            # opens a Chrome window with the multiview + control panel
+uv run nohuddle --league cfb --site https://<stream site>   # remembered after the first run
 ```
 
 Needs [uv](https://docs.astral.sh/uv/) and Google Chrome (the app drives your installed Chrome, so there's no separate browser download).
@@ -20,7 +20,7 @@ Needs [uv](https://docs.astral.sh/uv/) and Google Chrome (the app drives your in
 - 👁 shows what the detector sees (green = overlay visible, red = learned but not visible).
 - Keys: `S` panel, `M` single/multi, `F` fullscreen.
 
-Settings, the watchlist, learned overlays, the network library, saved reports and the app's Chrome profile live in `data/` in the checkout (gitignored; it holds your stream site and broadcast frames, so keep it out of git). Set `NFL_WATCHER_DATA` to use another folder; installed elsewhere, the default is `~/.config/nfl-watcher/`.
+Settings, the watchlist, learned overlays, the network library, saved reports and the app's Chrome profile live in `data/` in the checkout (gitignored; it holds your stream site and broadcast frames, so keep it out of git). Set `NOHUDDLE_DATA` to use another folder; installed elsewhere, the default is `~/.config/nohuddle/`.
 
 ## How break detection works
 

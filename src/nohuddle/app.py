@@ -25,17 +25,17 @@ from .health import PlaybackHealth
 from .networks import NetworkLibrary
 from .streams import Game, StreamSite
 
-log = logging.getLogger("nfl_watcher")
+log = logging.getLogger("nohuddle")
 
 def _data_dir() -> Path:
-    """Where settings and learned overlays live: $NFL_WATCHER_DATA, else data/ in the repo checkout
-    this is running from (gitignored), else ~/.config/nfl-watcher."""
-    if env := os.environ.get("NFL_WATCHER_DATA"):
+    """Where settings and learned overlays live: $NOHUDDLE_DATA, else data/ in the repo checkout
+    this is running from (gitignored), else ~/.config/nohuddle."""
+    if env := os.environ.get("NOHUDDLE_DATA"):
         return Path(env).expanduser()
     checkout = Path(__file__).resolve().parents[2]
     if (checkout / "pyproject.toml").exists() and (checkout / ".git").exists():
         return checkout / "data"
-    return Path.home() / ".config" / "nfl-watcher"
+    return Path.home() / ".config" / "nohuddle"
 
 
 CONFIG_DIR = _data_dir()
