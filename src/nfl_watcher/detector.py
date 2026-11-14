@@ -75,6 +75,9 @@ class DetectorSettings:
     network_hits: int = 3  # frames a known network's overlays must show up in before adopting it...
     network_hits_span: float = 4.0  # ...spread over at least this long
     prior_history_span: float = 180.0  # with a network's model to go on, learn our own more patiently
+    # While learning, no clock reading for this long (on a readable scorebug) means it's off: hidden.
+    # Some scorebugs only read cleanly every few frames, so not too tight.
+    learning_clock_window: float = 12.0
 
 
 def preprocess(frame_bgr: np.ndarray) -> np.ndarray:
@@ -176,8 +179,13 @@ class BreakDetector:
     def observe(self, frame_bgr: np.ndarray, t: float) -> State:
         grey = preprocess(frame_bgr)
         learned = self.model is not None and bool(self.model.regions)
+        # While learning, a readable scorebug that hasn't been read for a while means we're probably
+        # looking at ads: leave those frames out. Otherwise learn from everything (overlays only need
+        # to be there most of the time).
+        no_recent_clock = self.clock.readable and not self.clock.live(t, within=self.s.learning_clock_window)
+        keep = (not no_recent_clock) if not learned else self.state != State.BREAK
         # Break frames stay out of the history so a long ad break can't wash out the overlays.
-        if (self.state != State.BREAK or not learned) and t - self._last_sample >= self.s.sample_every:
+        if keep and t - self._last_sample >= self.s.sample_every:
             self.history.append((t, grey))
             self._last_sample = t
         self._maybe_refit(t)
@@ -195,7 +203,9 @@ class BreakDetector:
 
         # Read the scorebug: is this *now* (not a highlight, another game, or halftime)? Read less
         # often when nothing's on screen - but still read, since the learned overlays can be wrong.
-        busy = any_overlay or self.clock.live(t, within=15.0)  # on screen, or overlays and clock disagree
+        # Read often when there's a scorebug to read, when overlays and clock disagree, or while
+        # learning (the clock is then what decides whether the game is shown).
+        busy = any_overlay or not learned or self.clock.live(t, within=15.0)
         every = self.s.read_clock_every if busy else self.s.read_clock_every_idle
         if self.read_clock and t - self._last_read >= every:
             self._last_read = t
@@ -237,6 +247,11 @@ class BreakDetector:
                 return self._set(State.BREAK, t)
             if clock_live:
                 return self._set(State.LIVE, t)
+            if self.clock.readable and not self.clock.live(t, within=self.s.learning_clock_window):
+                # Nothing learned yet, but this scorebug can be read and it isn't on screen: an ad,
+                # most likely. Don't show it while we wait.
+                self.detail = "ads"
+                return self._set(State.BREAK, t)
             if self.history and self.history[-1][0] - self.history[0][0] >= self.s.no_overlays_break_after:
                 self.detail = "no overlays"
                 return self._set(State.BREAK, t)

@@ -36,6 +36,9 @@ POLL_OTHER = 4.0
 RELOADS_BEFORE_MIRROR = 2
 MIRROR_COOLDOWN = 120.0  # don't hop mirrors for lag more often than this
 NETWORK_LEARN_EVERY = 600.0  # fold a game's proven overlays into its network's entry this often
+# Only NFL games share learned overlays: other leagues (college especially) are on different
+# networks and graphics packages, so each of their games learns on its own.
+LIBRARY_LEAGUES = {"nfl"}
 
 # Runs in every frame (including the stream players) before any page script.
 ANTI_POPUP_JS = """
@@ -122,7 +125,7 @@ class Controller:
             break_after=s.get("break_after", DetectorSettings.break_after),
             live_after=s.get("live_after", DetectorSettings.live_after),
         )
-        self.library = NetworkLibrary(CONFIG_DIR / "networks", self.settings)
+        self.library = NetworkLibrary(CONFIG_DIR / "networks" / "nfl", self.settings)
         self.watched: dict[str, Watched] = {}
         self.priority: list[str] = []
         for g in cfg.get("watchlist", []):
@@ -166,7 +169,8 @@ class Controller:
             # NFL halftime is ~13 minutes; college is usually 20.
             min_halftime=(12 if game.league == "nfl" else 18) * 60,
         )
-        d = BreakDetector(self.settings, clock, networks=self.library.candidates)
+        shares = game.league in LIBRARY_LEAGUES
+        d = BreakDetector(self.settings, clock, networks=self.library.candidates if shares else None)
         path = self._model_path(game.id, embed_index)
         if path.exists():
             try:
@@ -199,7 +203,7 @@ class Controller:
         path.parent.mkdir(exist_ok=True)
         np.save(path, d.model.persistence.astype(np.float16))
         w.saved_version = d.model_version
-        if time.time() - w.network_learned_at >= NETWORK_LEARN_EVERY:
+        if w.game.league in LIBRARY_LEAGUES and time.time() - w.network_learned_at >= NETWORK_LEARN_EVERY:
             hint = d.network_votes.most_common(1)[0][0] if d.network_votes else None
             d.network = self.library.learn(d.model.persistence, hint)
             w.network_learned_at = time.time()

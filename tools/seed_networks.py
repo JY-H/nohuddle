@@ -4,7 +4,7 @@
 
 Stills should be spread across a broadcast (different plays, shots and scores), so that only the
 overlays stay put. Each folder becomes an overlay map, the network is read off the logo, and the
-map is folded into ~/.config/nfl-watcher/networks/ like a game watched live would be.
+map is folded into ~/.config/nfl-watcher/networks/nfl/ like an NFL game watched live would be.
 """
 
 import argparse
@@ -70,7 +70,7 @@ def main() -> None:
 
     if args.dry_run:
         return
-    library = NetworkLibrary(CONFIG_DIR / "networks", settings)
+    library = NetworkLibrary(CONFIG_DIR / "networks" / "nfl", settings)
     # Games whose network name could be read go first, so unnamed ones join a named entry.
     for name, persistence, hint, _model, _still in sorted(games, key=lambda g: g[2] is None):
         print(f"{name} -> {library.learn(persistence, hint)}")

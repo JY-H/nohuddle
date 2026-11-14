@@ -311,3 +311,26 @@ def test_library_keeps_different_networks_apart(tmp_path):
     assert library.learn(b.model.persistence) != "NET"
     assert library.learn(a.model.persistence, "NET") == "NET"
     assert library.networks["NET"].games == 2
+
+
+def test_learning_game_with_readable_clock_hides_ads(monkeypatch):
+    """Started (or restarted) during an ad break, before any overlays are learned."""
+    shown = {"text": texts("TEXAS A&M", "2nd QTR 12:36", "TENNESSEE")}
+    monkeypatch.setattr(gameclock, "read_text", lambda frame: shown["text"])
+    det = BreakDetector(read_clock=True)
+    assert run(det, broadcast, 0, 20) in scheduler.WATCHABLE  # clock confirms the game
+    shown["text"] = []
+    assert run(det, scene, 20, 50) == State.BREAK  # ads: hidden ~12s in, instead of minutes
+    assert all(t <= 32 for t, _ in det.history)  # and mostly not learned from
+    shown["text"] = texts("TEXAS A&M", "2nd QTR 12:30", "TENNESSEE")
+    assert run(det, broadcast, 50, 56) in scheduler.WATCHABLE
+
+
+def test_single_reading_resumes_where_the_game_was():
+    c = GameClock()
+    feed(c, 2, 760, 0, 10)  # Q2 12:40 -> 12:32
+    assert c.max_elapsed is not None
+    c.update(reading(2, 756), 200)  # back from ads, one reading after a long gap
+    assert c.live(200)
+    c.update(reading(4, 300), 300)  # a lone reading that jumps: still needs a second one
+    assert not c.live(300)

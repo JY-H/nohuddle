@@ -204,6 +204,7 @@ class ClockSettings:
     run_slack: float = 10.0  # game seconds a run's clock may run ahead of real time (OCR jitter)
     resync_after: float = 60.0  # a steadily running clock for this long is live play, full stop
     quarter_memory: float = 180.0  # how long a read quarter is assumed for quarter-less readings
+    resume_slack: float = 30.0  # game seconds a lone reading may differ from where we were and still count
     verdict_ttl: float = 8.0  # how long a single reading's verdict stands
     min_halftime: float = 12 * 60  # fallback when the clock can't be read: NFL ~13 min
     halftime_resume_scorebug: float = 30.0  # ...and the scorebug back this long
@@ -304,7 +305,9 @@ class GameClock:
         self._verdict = (t, "live")
         q = "OT" if r.quarter == 5 else f"Q{r.quarter}"
         self.display = f"{q} {r.clock // 60}:{r.clock % 60:02d}"
-        if self._run_n < 2:
+        # Two agreeing readings, or one that picks up right where the game was: coming back from
+        # a break, the next reading often follows a run of stat graphics with no clock on them.
+        if self._run_n < 2 and not self._resumes(e, t):
             return
         self._confirmed_live_at = t
         if e > self.max_elapsed:
@@ -317,6 +320,11 @@ class GameClock:
         elif r.quarter is not None and r.quarter >= 3:
             self.halftime_since = None  # second half underway
             self.halftime_done = True
+
+    def _resumes(self, e: int, t: float) -> bool:
+        if self.max_elapsed is None:
+            return False
+        return self.max_elapsed - self.s.resume_slack <= e <= self.max_elapsed + min(t - self.max_at, 300) + self.s.resume_slack
 
     def _continues_run(self, t: float, e: int | None) -> bool:
         if self._run_last is None or e is None:
