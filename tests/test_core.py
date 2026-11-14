@@ -156,6 +156,7 @@ def test_parse_scorebug_text():
     assert (parse(texts("DUKE", "3Ro :47", "19")).quarter, parse(texts("3Ro :47")).clock) == (3, 47)  # under a minute
     assert parse(texts("13", ":25")).clock is None  # a lone play clock
     assert parse(texts("2ND & GOAL", "3RD", ":47", "34")).clock == 47
+    assert parse(texts("FOX NFL", "35", ":15", "2ND")).clock == 15  # FOX: clock before the quarter
     assert parse(texts("3RD", "6:33", ":25")).clock == 393  # full clock wins over the play clock
     assert parse(texts("3:30 PM ET")).clock is None
     assert parse(texts("HALFTIME")).halftime

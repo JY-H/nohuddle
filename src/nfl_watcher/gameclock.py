@@ -109,12 +109,15 @@ def parse(texts: list[Text]) -> Reading:
         if len(clocks) == 1:
             r.clock = clocks[0][1]
     if quarters and not clocks:
-        # "3RD" and ":47" read as separate pieces: take the one read right after the quarter.
-        i = next(i for i, t in enumerate(texts) if t is quarters[0][0])
-        nxt = texts[i + 1] if i + 1 < len(texts) else None
-        if nxt and (m := re.fullmatch(r"\s*[:;](\d{2})\s*", nxt.s)) and int(m.group(1)) < 60 \
-                and ((nxt.x - quarters[0][0].x) ** 2 + (nxt.y - quarters[0][0].y) ** 2) ** 0.5 < 0.1:
-            clocks.append((nxt, int(m.group(1))))
+        # "3RD" and ":47" read as separate pieces: take the one read right next to the quarter
+        # (FOX shows ":26" before "2ND", ESPN ":47" after "3RD").
+        qt = quarters[0][0]
+        i = next(i for i, t in enumerate(texts) if t is qt)
+        for nb in (texts[i + 1] if i + 1 < len(texts) else None, texts[i - 1] if i > 0 else None):
+            if nb and (m := re.fullmatch(r"\s*[:;](\d{2})\s*", nb.s)) and int(m.group(1)) < 60 \
+                    and ((nb.x - qt.x) ** 2 + (nb.y - qt.y) ** 2) ** 0.5 < 0.1:
+                clocks.append((nb, int(m.group(1))))
+                break
     if quarters:
         qt, r.quarter = quarters[0]
         if clocks:
