@@ -28,6 +28,13 @@ function badge(g, now) {
 // ---------- stage ----------
 
 // Rectangles (fractions of the stage) for n visible games; the first is the game with audio.
+const DRAWER_HEIGHT = 0.2;  // share of the stage the drawer of hidden games takes when open
+const drawerOpen = () => localStorage.getItem('drawer') === 'on';
+function toggleDrawer() {
+  localStorage.setItem('drawer', drawerOpen() ? 'off' : 'on');
+  renderStage();
+}
+
 // Where the draggable divider sits, per layout (fraction of the stage width); remembered.
 const SPLIT_DEFAULTS = { two: 0.5, featured: 2 / 3 };
 const splits = { ...SPLIT_DEFAULTS, ...JSON.parse(localStorage.getItem('splits') || '{}') };
@@ -71,7 +78,8 @@ function renderStage() {
       const label = document.createElement('div');
       label.className = 'tile-label';
       label.innerHTML = '<span></span><button class="tile-dbg" title="Something look wrong? See what the detector sees">🐞</button>';
-      label.onclick = () => post('/api/pin', { id: g.id });
+      // Clicking a main tile pins it; clicking a drawer tile does nothing (it's just for a look).
+      label.onclick = () => { if (!label.classList.contains('drawer-tile')) post('/api/pin', { id: g.id }); };
       label.querySelector('.tile-dbg').onclick = (e) => { e.stopPropagation(); openDebug(g.id); };
       stage.append(iframe, label);
       f = { iframe, label, src: null, nonce: null };
@@ -81,22 +89,35 @@ function renderStage() {
       f.iframe.src = g.embed_url; // assigning (even the same URL) reloads the player
       f.src = g.embed_url; f.nonce = g.nonce;
     }
-    f.label.querySelector('span').textContent = `${g.id === state.active ? '🔊 ' : ''}${g.title}`;
   }
 
-  const rects = layout(state.visible.length);
+  // Hidden games (on a break, still checking) can be peeked at in a drawer along the bottom:
+  // small, muted, labelled with why they're hidden. Otherwise they play under the curtain.
+  const hidden = state.games.filter((g) => !state.visible.includes(g.id));
+  const D = drawerOpen() && hidden.length ? DRAWER_HEIGHT : 0;
+  const rects = layout(state.visible.length).map(([x, y, w, h]) => [x, y * (1 - D), w, h * (1 - D)]);
   const kind = state.mode === 'multi' ? splitKind(state.visible.length) : null;
   $('#splitter').hidden = !kind;
-  if (kind) $('#splitter').style.left = `${splits[kind] * 100}%`;
+  if (kind) Object.assign($('#splitter').style, { left: `${splits[kind] * 100}%`, bottom: `${D * 100}%` });
+  $('#empty').style.bottom = `${D * 100}%`;
+  $('#drawer-toggle').classList.toggle('on', drawerOpen());
   const shown = new Map(state.visible.map((id, i) => [id, rects[i]]));
+  const tileW = Math.min(0.25, 1 / Math.max(1, hidden.length));
+  hidden.forEach((g, i) => { if (D) shown.set(g.id, [i * tileW, 1 - D, tileW, D]); });
+  const byId = new Map(state.games.map((g) => [g.id, g]));
   for (const [id, f] of frames) {
     const rect = shown.get(id);
-    // Hidden games keep playing (muted, under the curtain) so they can still be watched for breaks.
+    const inDrawer = !!rect && !state.visible.includes(id);
     f.iframe.classList.toggle('shown', !!rect);
     place(f.iframe, rect || [0, 0, 1, 1]);
     f.label.hidden = !rect;
     if (rect) place(f.label, rect);
     f.label.classList.toggle('audio', id === state.active);
+    f.label.classList.toggle('drawer-tile', inDrawer);
+    const g = byId.get(id);
+    f.label.querySelector('span').innerHTML = inDrawer
+      ? `${esc(g.title)} ${badge(g, state.now)}`
+      : `${id === state.active ? '🔊 ' : ''}${esc(g.title)}`;
   }
 
   const empty = state.games.length > 0 && state.visible.length === 0;
@@ -254,6 +275,7 @@ $('#unpin').onclick = () => post('/api/pin', { id: null });
 $('#chime').checked = chimeOn();
 $('#chime').onchange = (e) => localStorage.setItem('chime', e.target.checked ? 'on' : 'off');
 $('#panel-toggle').onclick = () => document.body.classList.toggle('panel-hidden');
+$('#drawer-toggle').onclick = toggleDrawer;
 $('#save-settings').onclick = () => post('/api/settings', {
   break_after: +$('#break_after').value, live_after: +$('#live_after').value, site: $('#site').value,
 }).then(() => { document.activeElement.blur(); toast('Settings saved'); });
@@ -370,6 +392,7 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'm' || e.key === 'M') post('/api/auto', { mode: state.mode === 'single' ? 'multi' : 'single' });
   else if (e.key === 'f' || e.key === 'F') document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
   else if (e.key === 'a' || e.key === 'A') post('/api/pin', { id: null });
+  else if (e.key === 'b' || e.key === 'B') toggleDrawer();
   else if (/^[1-9]$/.test(e.key) && state.games[+e.key - 1]) post('/api/pin', { id: state.games[+e.key - 1].id });
 });
 

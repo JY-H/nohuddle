@@ -96,3 +96,10 @@ details input[type=number] { width: 60px; }
 #splitter:hover::after, body.resizing #splitter::after { background: var(--accent); }
 body.resizing, body.resizing * { cursor: col-resize !important; user-select: none; }
 body.resizing #stage iframe { transition: none; }
+
+#drawer-toggle { position: absolute; z-index: 6; right: 48px; top: 8px; opacity: 0; transition: opacity .2s; letter-spacing: -2px; }
+#stage:hover #drawer-toggle { opacity: .8; }
+#drawer-toggle.on { opacity: .8; border-color: var(--accent); }
+.tile-label.drawer-tile { cursor: default; box-shadow: inset 0 0 0 1px rgba(255,255,255,.18); }
+.tile-label.drawer-tile span { opacity: 1; font-size: 11px; left: 4px; top: 4px; right: 4px; padding: 1px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile-label.drawer-tile .tile-dbg { top: auto; bottom: 4px; right: 4px; }

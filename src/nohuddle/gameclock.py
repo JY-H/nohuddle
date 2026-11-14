@@ -85,9 +85,27 @@ def _quarter_in(s: str) -> int | None:
     return None
 
 
+# OCR sometimes returns Cyrillic look-alikes ("1Sт", "25РЛ"); map them to Latin first.
+LOOKALIKES = str.maketrans("тТоОрРнНаАеЕсСвВмМкКхХуУ", "TTOOPPHHAAEECCBBMMKKXXYY")
+# Down and distance ("1ST & 10"), including OCR's "1ST 8.10" (& read as 8). Only treated as such
+# when a real clock is elsewhere on screen, since "2ND 8.47" can also be a misread clock.
+DOWN_DISTANCE_RE = re.compile(r"(?<!\d)[1-4]\s*(?:ST|ND|RD|TH|S[T7]|N[D0O]|R[D0O])\W{0,2}(?:&|8)\W{0,2}(?:\d{1,2}|GOAL|GL)\b")
+
+
+def _drop_down_and_distance(texts: list[Text]) -> list[Text]:
+    clock_texts = {id(t) for t in texts if CLOCK_RE.search(t.s)}
+    out = []
+    for t in texts:
+        if DOWN_DISTANCE_RE.search(t.s) and clock_texts - {id(t)}:
+            t = Text(DOWN_DISTANCE_RE.sub(" ", t.s), t.x, t.y)
+        out.append(t)
+    return out
+
+
 def parse(texts: list[Text]) -> Reading:
     """Turn recognised text into a reading. Pairs the quarter with the clock next to it."""
     r = Reading()
+    texts = _drop_down_and_distance([Text(t.s.translate(LOOKALIKES).upper(), t.x, t.y) for t in texts])
     quarters = [(t, q) for t in texts if (q := _quarter_in(t.s.upper())) is not None]
     clocks = []
     for t in texts:
@@ -214,6 +232,10 @@ class ClockSettings:
     max_halftime: float = 35 * 60  # give up on a halftime that never ends (missed the 3rd-qtr read)
     min_team_readings: int = 15  # readings needed before trusting the learned team names
     kickoff: float = 0.0  # wall time the game started, if known
+    # 60 minutes of game clock take ~3 hours (even the quickest games ~2h40), so by wall-clock time
+    # since kickoff the game can't be further along than this fraction (plus pregame slack).
+    max_pace: float = 0.6
+    pace_slack: float = 300.0
     halftime_window: tuple[float, float] = (60 * 60, 130 * 60)  # when halftime can happen, after kickoff
 
 
@@ -259,10 +281,26 @@ class GameClock:
         return [w for w, c in sorted(self.team_counts.items(), key=lambda kv: -kv[1])
                 if c >= 0.3 * self.team_readings][:4]
 
+    def _max_possible(self, t: float) -> float:
+        """The furthest the game can be by now, going by kickoff time (inf if unknown)."""
+        if not self.s.kickoff or t < self.s.kickoff:
+            return float("inf")
+        return self.s.max_pace * (t - self.s.kickoff) + self.s.pace_slack
+
     def update(self, r: Reading, t: float, raw: list[str] | None = None) -> None:
         if raw is not None:
             self.log.append({"t": round(t, 1), "raw": raw[:12], "quarter": r.quarter, "clock": r.clock,
                              "max_elapsed": self.max_elapsed})
+        possible = self._max_possible(t)
+        if self.max_elapsed is not None and self.max_elapsed > possible:
+            # Our position is further along than the game can be (a misread got trusted): forget it,
+            # and anything that followed from it.
+            self.log.append({"t": round(t, 1), "resync": None, "was": self.max_elapsed, "why": "impossible"})
+            self.max_elapsed, self._quarter = None, None
+            self._run_start = self._run_last = None
+            self._run_n = 0
+            if possible < 2 * QUARTER_SECONDS:
+                self.halftime_since, self.halftime_done = None, False
         if r.halftime:
             if self._halftime_hint is not None and t - self._halftime_hint <= self.s.confirm_window:
                 self._start_halftime(t, by_clock=True)
@@ -271,6 +309,12 @@ class GameClock:
             qt, q, last_clock = self._quarter
             # Same quarter if it was read recently and the clock hasn't jumped back up.
             if t - qt <= self.s.quarter_memory and r.clock <= last_clock + 30:
+                r = Reading(q, r.clock, r.halftime, r.words)
+        if r.quarter is None and r.clock is not None and self.max_elapsed is not None:
+            # Quarter unreadable for a while (some scorebugs print it tiny): if the clock is still
+            # counting down within the quarter the game was last in, it's that quarter.
+            q = min(5, self.max_elapsed // QUARTER_SECONDS + 1)
+            if r.clock <= QUARTER_SECONDS - self.max_elapsed % QUARTER_SECONDS + 30:
                 r = Reading(q, r.clock, r.halftime, r.words)
         if r.quarter is not None and r.clock is not None and self._quarter and r.quarter != self._quarter[1]:
             # A clock that continues the one running right now, to the second, is the live game
@@ -281,6 +325,8 @@ class GameClock:
         e = r.elapsed
         if e is None:
             return
+        if e > possible:
+            return  # further along than the game can be yet: a misread (e.g. down-and-distance)
         self.readable = True
         self._quarter = (t, r.quarter, r.clock)
         run_for = self._extend_run(t, e)

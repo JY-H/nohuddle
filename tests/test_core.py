@@ -173,6 +173,10 @@ def test_parse_scorebug_text():
     assert parse(texts("13", ":25")).clock is None  # a lone play clock
     assert parse(texts("2ND & GOAL", "3RD", ":47", "34")).clock == 47
     assert parse(texts("FOX NFL", "35", ":15", "2ND")).clock == 15  # FOX: clock before the quarter
+    # ABC: "1st & 10" read as "1Sт 8.10" (Cyrillic t, & as 8) next to the real clock
+    abc = parse(texts("SEC ON ABC", "22 MISSOURI", "1Sт 8.10", "3:32", "1 GEORGIA"))
+    assert abc.quarter is None and abc.clock == 212
+    assert parse(texts("2ND 8.47")).clock == 527  # no other clock: still a (misread) clock
     assert parse(texts("3RD", "6:33", ":25")).clock == 393  # full clock wins over the play clock
     assert parse(texts("3:30 PM ET")).clock is None
     assert parse(texts("HALFTIME")).halftime
@@ -351,3 +355,27 @@ def test_single_reading_resumes_where_the_game_was():
     assert c.live(200)
     c.update(reading(4, 300), 300)  # a lone reading that jumps: still needs a second one
     assert not c.live(300)
+
+
+def test_quarter_inferred_from_position_when_unreadable():
+    c = GameClock()
+    feed(c, 3, 470, 0, 10)  # Q3 7:50 -> 7:42, then the quarter stops being readable
+    t = 300.0
+    for clock in range(228, 200, -2):  # "3:48", "3:46", ... with no quarter
+        c.update(Reading(None, clock, words={"GEORGIA"}), t)
+        t += 2
+    assert c.live(t - 2) and c.display == "Q3 3:22"
+
+
+def test_position_cannot_run_ahead_of_kickoff():
+    from nohuddle.gameclock import ClockSettings
+    kickoff = 1000.0
+    c = GameClock(ClockSettings(kickoff=kickoff))
+    t = kickoff + 25 * 60  # 25 minutes after kickoff: early 1st quarter at best...
+    c.update(reading(3, 462), t)  # ..."3RD 8.5" + the real clock: impossible, ignored
+    c.update(reading(3, 460), t + 2)
+    assert c.max_elapsed is None and not c.halftime_done
+    c.max_elapsed, c.max_at, c.halftime_done = 2238, t, True  # a bad position saved earlier
+    feed(c, 1, 202, t + 4, 10)  # the real game: Q1 3:22
+    assert c.max_elapsed < 900 and not c.halftime_done
+    assert c.live(t + 12) and c.display.startswith("Q1")
