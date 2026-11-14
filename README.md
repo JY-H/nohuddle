@@ -29,7 +29,7 @@ Live broadcasts have graphics composited over the picture: the scorebug, the net
 1. Every 4s a frame goes into a ~10 minute history (break frames excluded, so long ad breaks can't wash the model out).
 2. Pixels that are an **edge in ≥70% of frames** are overlay outlines — even translucent logos keep their edges, while moving scenery doesn't.
 3. Those pixels are grouped into regions; each frame, each region's edge pattern is **correlated** with the current edges (busy ad scenes don't correlate with a logo's shape).
-4. **Any** region matching = broadcast. All gone for 8s = **break**; back for 2s = **live**.
+4. **Any** region matching = broadcast. All gone (scorebug *and* logo) for 4s = **break**; back for 2s = **live**.
 5. The largest region is the scorebug. If only the logo has been there for 2+ minutes, it's an **intermission** (halftime show) and counts as a break. Minutes with no overlays at all also count as a break.
 
 Learned overlays are saved per game and source, so restarting mid-game (or mid-halftime) doesn't start from scratch.
@@ -44,7 +44,7 @@ Edge matching knows *a* scorebug is on screen but not *when* it's from — halft
 - Readings only move the "furthest point" when two in a row agree, so OCR slips don't derail it.
 - **Fallback** when the clock can't be read: halftime (only possible 60–130 min after kickoff) lasts at least 12 min for NFL / 18 min for college, plus 30s of scorebug before it counts as live again.
 
-Polling: the main game every 2s, a higher-priority game you're waiting on every 1s, the rest every 4s.
+Polling: the main game and a higher-priority game you're waiting on every 1s, the rest every 4s.
 
 Stream health: no video progress for 15s = stalled (reload, then next mirror); less than 0.85s of video per second or 3+ rebuffers in a minute = laggy (next mirror, at most every 2 minutes). Games with a single source are just marked laggy.
 

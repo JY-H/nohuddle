@@ -17,7 +17,8 @@ has been gone for `break_after` seconds, so short full-screen graphics don't tri
 while the return to live (`live_after`) is fast so you don't miss the snap.
 """
 
-from collections import deque
+from collections import Counter, deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -50,7 +51,10 @@ class DetectorSettings:
     region_match: float = 0.35  # correlation with the learned edge pattern needed to count as present
     min_region_px: int = 20  # persistent edge pixels needed for a region
     max_region_area: float = 0.15  # bounding box larger than this share of the frame = scenery
-    break_after: float = 8.0  # seconds with no overlay before declaring a break
+    # Seconds with no overlay (neither scorebug nor logo) before declaring a break. Measured on real
+    # broadcasts: 4s gives the same false switches as 8s (replays/transitions with no graphics),
+    # but leaves the screen 4s sooner; 3s starts switching away during replays.
+    break_after: float = 4.0
     live_after: float = 2.0  # seconds with an overlay back before declaring live
     # The network logo stays up through halftime shows; the scorebug doesn't. Replays and stat
     # graphics hide the scorebug for well under this long.
@@ -68,6 +72,9 @@ class DetectorSettings:
     clock_disagree_relearn: float = 20.0  # clock says live but no overlays for this long -> relearn
     stuck_break_relearn: float = 480.0  # "break" (not halftime) this long -> relearn
     long_break_halftime: float = 300.0  # a break this long right after the 2nd quarter = halftime
+    network_hits: int = 3  # frames a known network's overlays must show up in before adopting it...
+    network_hits_span: float = 4.0  # ...spread over at least this long
+    prior_history_span: float = 180.0  # with a network's model to go on, learn our own more patiently
 
 
 def preprocess(frame_bgr: np.ndarray) -> np.ndarray:
@@ -82,9 +89,9 @@ def edges(grey: np.ndarray) -> np.ndarray:
 class OverlayModel:
     """Persistent-overlay regions, from a map of how often each pixel is an edge."""
 
-    def __init__(self, persistence: np.ndarray, s: DetectorSettings):
+    def __init__(self, persistence: np.ndarray, s: DetectorSettings, threshold: float | None = None):
         self.persistence = persistence.astype(np.float32)
-        mask = self.persistence >= s.edge_persistence
+        mask = self.persistence >= (s.edge_persistence if threshold is None else threshold)
         mask[:3, :] = mask[-3:, :] = mask[:, :3] = mask[:, -3:] = False  # player borders
 
         # Merge nearby edge pixels (letters of one scorebug, one logo) into regions.
@@ -130,8 +137,14 @@ class OverlayModel:
 
 class BreakDetector:
     def __init__(self, settings: DetectorSettings | None = None, clock_settings: ClockSettings | None = None,
-                 read_clock: bool = gameclock.OCR_AVAILABLE):
+                 read_clock: bool = gameclock.OCR_AVAILABLE,
+                 networks: Callable[[], list[tuple[str, "OverlayModel"]]] | None = None):
         self.s = settings or DetectorSettings()
+        self.networks = networks  # known networks' overlay models, to start from
+        self.network: str | None = None  # which one this broadcast looks like
+        self.network_votes: Counter = Counter()  # network names read off the screen
+        self._from_network = False  # current model came from the library, not this game
+        self._network_hits: dict[str, tuple[float, int]] = {}
         self.clock = GameClock(clock_settings)
         self.read_clock = read_clock
         self._last_read = -1e9
@@ -169,6 +182,8 @@ class BreakDetector:
             self._last_sample = t
         self._maybe_refit(t)
         learned = self.model is not None and bool(self.model.regions)
+        if not learned and self.networks:
+            learned = self._try_networks(grey, t)
 
         self.last_scores = self.model.scores(grey) if learned else []
         any_overlay = any(sc >= self.s.region_match for sc in self.last_scores)
@@ -186,6 +201,7 @@ class BreakDetector:
             self._last_read = t
             texts = gameclock.read_text(frame_bgr)
             self.clock.update(gameclock.parse(texts), t, [x.s for x in texts])
+            self.network_votes.update(gameclock.network_votes([x.s for x in texts]))
         self._overlay_since = (self._overlay_since or t) if any_overlay else None
         # Logo steadily up (not one stray frame that resembles it) while the scorebug's been gone.
         intermission = (any_overlay and t - self._overlay_since >= self.s.intermission_logo_for
@@ -194,7 +210,7 @@ class BreakDetector:
             self.clock.note_intermission(t)
         halftime = self.clock.in_halftime(t, t - self._primary_since if self._primary_since is not None else 0.0)
         stale = self.clock.verdict(t)
-        clock_live = self.clock.live(t)
+        clock_live = self.clock.live(t, within=self.s.read_clock_every + 0.5)  # just the latest reading
 
         if learned and self.clock.live(t, within=self.s.read_clock_every * 2) and not any_overlay:
             # The scorebug reads as live play but none of the learned overlays are there: they're
@@ -249,10 +265,26 @@ class BreakDetector:
             return self._set(State.LIVE, t)
         return self.state
 
+    def _try_networks(self, grey: np.ndarray, t: float) -> bool:
+        """Still learning: does this look like a network we already know? Adopt it if so."""
+        for name, model in self.networks():
+            if any(sc >= self.s.region_match for sc in model.scores(grey)):
+                first, n = self._network_hits.get(name, (t, 0))
+                self._network_hits[name] = (first, n + 1)
+                if n + 1 >= self.s.network_hits and t - first >= self.s.network_hits_span:
+                    self.model, self.network, self._from_network = model, name, True
+                    self._primary_seen_at = t
+                    self._network_hits.clear()
+                    return True
+            else:
+                self._network_hits.pop(name, None)
+        return False
+
     def _relearn(self, t: float) -> None:
         self.model = None
         self.history.clear()
         self.relearned += 1
+        self._from_network = False
         self._clock_disagrees_since = None
         self._set(State.LEARNING, t)
 
@@ -298,7 +330,8 @@ class BreakDetector:
     def _maybe_refit(self, t: float) -> None:
         if len(self.history) < self.s.min_history:
             return
-        if self.history[-1][0] - self.history[0][0] < self.s.min_history_span:
+        span = self.history[-1][0] - self.history[0][0]
+        if span < (self.s.prior_history_span if self._from_network else self.s.min_history_span):
             return
         if self.model is not None:
             if t - self._last_fit < self.s.refit_every:
@@ -308,6 +341,7 @@ class BreakDetector:
         first = self.model is None or not self.model.regions
         frames = [g for _, g in self.history]
         self.model = OverlayModel.from_frames(frames[-self.s.recent_fit_frames:] if first else frames, self.s)
+        self._from_network = False
         self.model_version += 1
         self._last_fit = t
         if first:

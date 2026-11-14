@@ -90,3 +90,9 @@ details input[type=number] { width: 60px; }
 #dbg-readings td:last-child { color: var(--muted); word-break: break-word; }
 #dbg-readings tr.resync td { color: var(--break); }
 .debug-card textarea { width: 100%; margin: 10px 0 8px; font: inherit; color: var(--text); background: #1d2128; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; resize: vertical; }
+
+#splitter { position: absolute; top: 0; bottom: 0; width: 12px; margin-left: -6px; z-index: 5; cursor: col-resize; }
+#splitter::after { content: ""; position: absolute; left: 5px; top: 0; bottom: 0; width: 2px; background: rgba(255,255,255,.15); transition: background .15s; }
+#splitter:hover::after, body.resizing #splitter::after { background: var(--accent); }
+body.resizing, body.resizing * { cursor: col-resize !important; user-select: none; }
+body.resizing #stage iframe { transition: none; }

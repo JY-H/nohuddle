@@ -14,7 +14,7 @@ the detector falls back to timing rules.
 """
 
 import re
-from collections import deque
+from collections import Counter, deque
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 
@@ -128,6 +128,30 @@ def parse(texts: list[Text]) -> Reading:
 
 def similar(a: str, b: str) -> bool:
     return a == b or (min(len(a), len(b)) >= 4 and SequenceMatcher(None, a, b).ratio() >= 0.75)
+
+
+# Logo text as OCR tends to see it. Order matters: "FOX NFL" is FOX, not NFL Network.
+NETWORK_PATTERNS = [
+    ("FOX", r"\bFOX\b"),
+    ("CBS", r"\bCBS"),  # often read as one word: "CBSSPORTS"
+    ("NBC", r"\bNBC\b|PEACOCK|SUNDAY NIGHT FOOTBALL"),
+    ("ESPN", r"\bESPN|\bE5PN|MONDAY NIGHT FOOTBALL"),
+    ("ABC", r"\babc\b"),
+    ("Prime Video", r"PRIME\s*VIDEO|\bTNF\b|THURSDAY NIGHT FOOTBALL"),
+    ("Netflix", r"NETFLIX"),
+    ("NFL Network", r"NFL\s*NETWORK|\bNFLN\b"),
+    ("TNT", r"\bTNT\b"),
+]
+
+
+def network_votes(texts: list[str]) -> Counter:
+    joined = " | ".join(texts)
+    votes = Counter()
+    for name, pattern in NETWORK_PATTERNS:
+        # ABC's logo is lowercase; everything else is matched case-insensitively.
+        if re.search(pattern, joined if name == "ABC" else joined.upper()):
+            votes[name] += 1
+    return votes
 
 
 # ---------- OCR ----------

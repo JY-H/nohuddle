@@ -28,12 +28,20 @@ function badge(g, now) {
 // ---------- stage ----------
 
 // Rectangles (fractions of the stage) for n visible games; the first is the game with audio.
+// Where the draggable divider sits, per layout (fraction of the stage width); remembered.
+const SPLIT_DEFAULTS = { two: 0.5, featured: 2 / 3 };
+const splits = { ...SPLIT_DEFAULTS, ...JSON.parse(localStorage.getItem('splits') || '{}') };
+const splitKind = (n) => (n === 2 ? 'two' : n >= 3 && n <= 4 ? 'featured' : null);
+
 function layout(n) {
   if (n <= 1) return [[0, 0, 1, 1]];
-  if (n === 2) return [[0, 0, .5, 1], [.5, 0, .5, 1]];
+  if (n === 2) {
+    const x = splits.two;
+    return [[0, 0, x, 1], [x, 0, 1 - x, 1]];
+  }
   if (n <= 4) {
-    const rest = n - 1;
-    return [[0, 0, 2 / 3, 1], ...Array.from({ length: rest }, (_, i) => [2 / 3, i / rest, 1 / 3, 1 / rest])];
+    const x = splits.featured, rest = n - 1;
+    return [[0, 0, x, 1], ...Array.from({ length: rest }, (_, i) => [x, i / rest, 1 - x, 1 / rest])];
   }
   const cols = 3, rows = Math.ceil((n + 3) / cols);
   const cells = [];
@@ -77,6 +85,9 @@ function renderStage() {
   }
 
   const rects = layout(state.visible.length);
+  const kind = state.mode === 'multi' ? splitKind(state.visible.length) : null;
+  $('#splitter').hidden = !kind;
+  if (kind) $('#splitter').style.left = `${splits[kind] * 100}%`;
   const shown = new Map(state.visible.map((id, i) => [id, rects[i]]));
   for (const [id, f] of frames) {
     const rect = shown.get(id);
@@ -95,6 +106,35 @@ function renderStage() {
   }
 }
 
+// Drag the divider between tiles to resize them; double-click to reset.
+$('#splitter').addEventListener('pointerdown', (e) => {
+  const kind = splitKind(state.visible.length);
+  if (!kind) return;
+  e.preventDefault();
+  const el = e.currentTarget;
+  el.setPointerCapture(e.pointerId);
+  document.body.classList.add('resizing');
+  const move = (ev) => {
+    const r = stage.getBoundingClientRect();
+    splits[kind] = Math.min(0.85, Math.max(0.15, (ev.clientX - r.left) / r.width));
+    renderStage();
+  };
+  const up = () => {
+    el.removeEventListener('pointermove', move);
+    document.body.classList.remove('resizing');
+    localStorage.setItem('splits', JSON.stringify(splits));
+  };
+  el.addEventListener('pointermove', move);
+  el.addEventListener('pointerup', up, { once: true });
+});
+$('#splitter').addEventListener('dblclick', () => {
+  const kind = splitKind(state.visible.length);
+  if (!kind) return;
+  splits[kind] = SPLIT_DEFAULTS[kind];
+  localStorage.setItem('splits', JSON.stringify(splits));
+  renderStage();
+});
+
 // ---------- panel ----------
 
 function renderPanel() {
@@ -110,7 +150,7 @@ function renderPanel() {
     $('#watchlist').innerHTML = state.games.map((g, i) => `
       <li draggable="true" data-id="${esc(g.id)}" class="${g.id === state.active ? 'active' : ''}">
         <span class="grip">⋮⋮</span>
-        <span class="title">${i + 1}. ${esc(g.title)}${g.clock ? ` <small class="clock">${esc(g.clock)}</small>` : ''}</span>
+        <span class="title">${i + 1}. ${esc(g.title)}${g.clock ? ` <small class="clock">${esc(g.clock)}</small>` : ''}${g.network ? ` <small class="clock">· ${esc(g.network)}</small>` : ''}</span>
         <span>${badge(g, state.now)}</span>
         <span class="actions">
           <button data-act="pin">${g.id === state.pinned ? '📌 Pinned' : 'Watch now'}</button>

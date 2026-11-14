@@ -21,6 +21,7 @@ from . import scheduler
 from .detector import W, H, BreakDetector, DetectorSettings, State
 from .gameclock import ClockSettings
 from .health import PlaybackHealth
+from .networks import NetworkLibrary
 from .streams import Game, StreamSite
 
 log = logging.getLogger("nfl_watcher")
@@ -29,11 +30,12 @@ CONFIG_DIR = Path.home() / ".config" / "nfl-watcher"
 STATIC_DIR = Path(__file__).parent / "static"
 
 # Poll intervals (seconds). See README for the reasoning.
-POLL_ACTIVE = 2.0
+POLL_ACTIVE = 1.0
 POLL_AWAITED = 1.0  # a higher-priority game on a break: we want to jump back the moment it returns
 POLL_OTHER = 4.0
 RELOADS_BEFORE_MIRROR = 2
 MIRROR_COOLDOWN = 120.0  # don't hop mirrors for lag more often than this
+NETWORK_LEARN_EVERY = 600.0  # fold a game's proven overlays into its network's entry this often
 
 # Runs in every frame (including the stream players) before any page script.
 ANTI_POPUP_JS = """
@@ -90,6 +92,7 @@ class Watched:
     health: PlaybackHealth = field(default_factory=PlaybackHealth)
     reloads: int = 0
     saved_version: int = 0
+    network_learned_at: float = 0.0
     clock_saved_at: float = 0.0
     mirror_changed_at: float = 0.0
     laggy: bool = False
@@ -119,6 +122,7 @@ class Controller:
             break_after=s.get("break_after", DetectorSettings.break_after),
             live_after=s.get("live_after", DetectorSettings.live_after),
         )
+        self.library = NetworkLibrary(CONFIG_DIR / "networks", self.settings)
         self.watched: dict[str, Watched] = {}
         self.priority: list[str] = []
         for g in cfg.get("watchlist", []):
@@ -162,7 +166,7 @@ class Controller:
             # NFL halftime is ~13 minutes; college is usually 20.
             min_halftime=(12 if game.league == "nfl" else 18) * 60,
         )
-        d = BreakDetector(self.settings, clock)
+        d = BreakDetector(self.settings, clock, networks=self.library.candidates)
         path = self._model_path(game.id, embed_index)
         if path.exists():
             try:
@@ -195,6 +199,11 @@ class Controller:
         path.parent.mkdir(exist_ok=True)
         np.save(path, d.model.persistence.astype(np.float16))
         w.saved_version = d.model_version
+        if time.time() - w.network_learned_at >= NETWORK_LEARN_EVERY:
+            hint = d.network_votes.most_common(1)[0][0] if d.network_votes else None
+            d.network = self.library.learn(d.model.persistence, hint)
+            w.network_learned_at = time.time()
+            log.info("%s looks like %s", w.game.title, d.network)
 
     # ---------- browser ----------
 
@@ -435,6 +444,7 @@ class Controller:
                     "state": self.watched[g].detector.state, "since": self.watched[g].detector.since,
                     "detail": self.watched[g].detector.detail,
                     "clock": self.watched[g].detector.clock.display,
+                    "network": self.watched[g].detector.network,
                     "overridden": self.watched[g].detector.override is not None,
                     "embed_index": self.watched[g].embed_index, "embed_url": self.watched[g].embed_url,
                     "nonce": self.watched[g].nonce, "laggy": self.watched[g].laggy,
@@ -549,7 +559,9 @@ class Controller:
 
     def _debug_info(self, w: Watched) -> dict:
         c = w.detector.clock
-        return {"id": w.game.id, "title": w.game.title, "state": w.detector.state, "detail": w.detector.detail,
+        return {"id": w.game.id, "title": w.game.title, "network": w.detector.network,
+                "network_votes": dict(w.detector.network_votes),
+                "state": w.detector.state, "detail": w.detector.detail,
                 "since": w.detector.since, "clock_display": c.display, "clock": c.to_json(), "teams": c.teams,
                 "readings": list(c.log), "scores": w.detector.last_scores,
                 "regions": w.detector.model.boxes() if w.detector.model else [],

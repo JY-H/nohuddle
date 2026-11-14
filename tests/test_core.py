@@ -40,8 +40,8 @@ def run(det, frames, t0, t1):
 def test_detects_break_and_return():
     det = BreakDetector(read_clock=False)
     assert run(det, broadcast, 0, 120) == State.LIVE
-    assert run(det, scene, 120, 125) == State.LIVE  # too short to be a break
-    assert run(det, scene, 125, 200) == State.BREAK
+    assert run(det, scene, 120, 123) == State.LIVE  # too short to be a break
+    assert run(det, scene, 123, 200) == State.BREAK
     assert run(det, broadcast, 200, 203) == State.LIVE
 
 
@@ -271,3 +271,43 @@ def test_misread_quarter_on_the_running_clock_is_corrected():
     assert c.verdict(t) is None and c.display == "Q3 2:00"
     c.update(reading(1, 400), t + 2)  # a real 1st-quarter highlight
     assert c.verdict(t + 2) == "highlight"
+
+
+def test_known_network_gives_new_games_a_head_start(tmp_path):
+    from nfl_watcher.detector import DetectorSettings
+    from nfl_watcher.networks import NetworkLibrary
+
+    settings = DetectorSettings()
+    first = BreakDetector(settings, read_clock=False)
+    run(first, broadcast, 0, 120)  # a game on this network, watched to the end of learning
+    library = NetworkLibrary(tmp_path, settings)
+    assert library.learn(first.model.persistence, "NET") == "NET"
+
+    reloaded = NetworkLibrary(tmp_path, settings)  # survives restarts
+    second = BreakDetector(settings, read_clock=False, networks=reloaded.candidates)
+    assert run(second, broadcast, 0, 8) == State.LIVE  # no minute of learning needed
+    assert second.network == "NET"
+    assert run(second, scene, 8, 30) == State.BREAK  # and it already knows what an ad looks like
+
+
+def test_library_keeps_different_networks_apart(tmp_path):
+    from nfl_watcher.detector import DetectorSettings
+    from nfl_watcher.networks import NetworkLibrary
+
+    settings = DetectorSettings()
+    library = NetworkLibrary(tmp_path, settings)
+    a = BreakDetector(settings, read_clock=False)
+    run(a, broadcast, 0, 120)
+    b = BreakDetector(settings, read_clock=False)
+
+    def other_network(t):
+        img = scene(t)
+        cv2.rectangle(img, (40, 20), (200, 70), (200, 30, 30), -1)
+        cv2.putText(img, "OTHER 7 - 3", (50, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+        return img
+
+    run(b, other_network, 0, 120)
+    assert library.learn(a.model.persistence, "NET") == "NET"
+    assert library.learn(b.model.persistence) != "NET"
+    assert library.learn(a.model.persistence, "NET") == "NET"
+    assert library.networks["NET"].games == 2
