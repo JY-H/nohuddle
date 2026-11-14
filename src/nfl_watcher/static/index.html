@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Game Watcher</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main id="stage">
+  <div id="curtain"></div>
+  <div id="empty" hidden>
+    <h1>All games on break</h1>
+    <p>Switching back as soon as one returns.</p>
+    <ul id="empty-list"></ul>
+  </div>
+  <div id="toast" hidden></div>
+  <button id="panel-toggle" title="Show/hide panel (S)">☰</button>
+</main>
+
+<aside id="panel">
+  <header>
+    <h2>Game Watcher</h2>
+    <div class="row">
+      <div class="seg" id="mode">
+        <button data-mode="single">Single</button>
+        <button data-mode="multi">Multiview</button>
+      </div>
+      <label class="switch"><input type="checkbox" id="auto"> Auto-switch</label>
+    </div>
+    <div id="pinned" hidden>📌 Pinned: <b id="pinned-title"></b> <button id="unpin">Resume auto</button></div>
+  </header>
+
+  <section>
+    <h3>Watchlist <small>drag to set priority</small></h3>
+    <ol id="watchlist"></ol>
+    <p class="hint" id="watch-empty">Add games below. The top game is your main game.</p>
+  </section>
+
+  <section>
+    <h3>Add games</h3>
+    <div class="row">
+      <select id="league">
+        <option value="nfl">NFL</option>
+        <option value="cfb">College football</option>
+        <option value="nba">NBA</option>
+        <option value="ncaab">College basketball</option>
+        <option value="nhl">NHL</option>
+        <option value="mlb">MLB</option>
+        <option value="soccer">Soccer</option>
+      </select>
+      <input id="filter" placeholder="Filter teams…">
+      <button id="refresh" title="Reload list">↻</button>
+    </div>
+    <ul id="games"></ul>
+    <form id="add-url" class="row">
+      <input id="url" placeholder="…or paste a game page URL">
+      <button>Add</button>
+    </form>
+    <p class="error" id="add-error" hidden></p>
+  </section>
+
+  <section>
+    <h3>Activity</h3>
+    <ul id="events"></ul>
+  </section>
+
+  <section>
+    <details>
+      <summary>Settings</summary>
+      <label>Call a break after <input type="number" id="break_after" min="1" step="1"> s with no scorebug or network logo</label>
+      <label>Switch back after <input type="number" id="live_after" min="0.5" step="0.5"> s of it returning</label>
+      <label>Stream site <input id="site"></label>
+      <button id="save-settings">Save</button>
+      <p class="hint">Keys: <kbd>S</kbd> panel · <kbd>M</kbd> single/multi · <kbd>F</kbd> fullscreen · <kbd>1</kbd>–<kbd>9</kbd> pin game · <kbd>A</kbd> resume auto · <kbd>D</kbd> debug the game with sound</p>
+    </details>
+  </section>
+</aside>
+
+<div id="debug" hidden>
+  <div class="debug-card">
+    <header class="row">
+      <b id="dbg-title"></b> <span id="dbg-status"></span>
+      <button id="dbg-close" title="Close (Esc)">✕</button>
+    </header>
+    <img id="dbg-img" alt="What the detector sees">
+    <p class="hint">Green boxes: overlays it recognises right now. Red: learned, but not on screen now. Numbers: how well each matches.</p>
+    <h4>Recent scorebug readings <small id="dbg-clockinfo"></small></h4>
+    <table id="dbg-readings"></table>
+    <textarea id="dbg-note" rows="2" placeholder="What looked wrong? e.g. &quot;showing a commercial&quot;, &quot;stuck on HIGHLIGHTS but it's live&quot;"></textarea>
+    <div class="row">
+      <button id="dbg-save">Save report</button>
+      <button id="dbg-copy">Copy details</button>
+      <span id="dbg-saved" class="hint"></span>
+    </div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
