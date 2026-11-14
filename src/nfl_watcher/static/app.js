@@ -102,8 +102,36 @@ function renderStage() {
   const empty = state.games.length > 0 && state.visible.length === 0;
   $('#empty').hidden = !empty;
   if (empty) {
-    $('#empty-list').innerHTML = state.games.map((g) => `<li>${esc(g.title)} ${badge(g, state.now)}</li>`).join('');
+    const solo = state.games.length === 1 ? state.games[0] : null;
+    const why = solo && { halftime: 'Halftime', highlight: 'Showing highlights', 'other game': 'Showing another game' }[solo.detail];
+    $('#empty-title').textContent = solo ? `${why || 'Commercial break'} · ${fmtDur(state.now - solo.since)}` : 'All games on break';
+    $('#empty-sub').textContent = solo
+      ? `${solo.title} is muted and hidden until it's back${solo.detail === 'halftime' ? ' for the 3rd quarter' : ''}.`
+      : 'Muted. Switching back as soon as one returns.';
+    $('#empty-list').innerHTML = solo ? '' : state.games.map((g) => `<li>${esc(g.title)} ${badge(g, state.now)}</li>`).join('');
   }
+  if (wasEmpty && !empty && chimeOn()) chime();
+  wasEmpty = empty;
+}
+
+// A soft two-note chime when play comes back after everything was on a break.
+let wasEmpty = false, audio = null;
+const chimeOn = () => localStorage.getItem('chime') !== 'off';
+function chime() {
+  try {
+    audio = audio || new AudioContext();
+    const now = audio.currentTime;
+    [660, 880].forEach((f, i) => {
+      const o = audio.createOscillator(), g = audio.createGain();
+      o.frequency.value = f;
+      g.gain.setValueAtTime(0, now + i * 0.18);
+      g.gain.linearRampToValueAtTime(0.15, now + i * 0.18 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.18 + 0.5);
+      o.connect(g).connect(audio.destination);
+      o.start(now + i * 0.18);
+      o.stop(now + i * 0.18 + 0.55);
+    });
+  } catch (e) { /* audio not available yet */ }
 }
 
 // Drag the divider between tiles to resize them; double-click to reset.
@@ -221,6 +249,8 @@ $('#watchlist').addEventListener('dragend', async (e) => {
 for (const b of document.querySelectorAll('#mode button')) b.onclick = () => post('/api/auto', { mode: b.dataset.mode });
 $('#auto').onchange = (e) => post('/api/auto', { auto: e.target.checked });
 $('#unpin').onclick = () => post('/api/pin', { id: null });
+$('#chime').checked = chimeOn();
+$('#chime').onchange = (e) => localStorage.setItem('chime', e.target.checked ? 'on' : 'off');
 $('#panel-toggle').onclick = () => document.body.classList.toggle('panel-hidden');
 $('#save-settings').onclick = () => post('/api/settings', {
   break_after: +$('#break_after').value, live_after: +$('#live_after').value, site: $('#site').value,

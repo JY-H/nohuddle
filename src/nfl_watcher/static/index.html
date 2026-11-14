@@ -10,8 +10,8 @@
   <div id="curtain"></div>
   <div id="splitter" hidden title="Drag to resize · double-click to reset"></div>
   <div id="empty" hidden>
-    <h1>All games on break</h1>
-    <p>Switching back as soon as one returns.</p>
+    <h1 id="empty-title">All games on break</h1>
+    <p id="empty-sub">Switching back as soon as one returns.</p>
     <ul id="empty-list"></ul>
   </div>
   <div id="toast" hidden></div>
@@ -70,6 +70,7 @@
       <summary>Settings</summary>
       <label>Call a break after <input type="number" id="break_after" min="1" step="1"> s with no scorebug or network logo</label>
       <label>Switch back after <input type="number" id="live_after" min="0.5" step="0.5"> s of it returning</label>
+      <label><input type="checkbox" id="chime"> Chime when a game comes back from a break</label>
       <label>Stream site <input id="site"></label>
       <button id="save-settings">Save</button>
       <p class="hint">Keys: <kbd>S</kbd> panel · <kbd>M</kbd> single/multi · <kbd>F</kbd> fullscreen · <kbd>1</kbd>–<kbd>9</kbd> pin game · <kbd>A</kbd> resume auto · <kbd>D</kbd> debug the game with sound</p>

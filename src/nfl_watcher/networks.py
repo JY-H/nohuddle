@@ -67,9 +67,16 @@ class NetworkLibrary:
         self.networks[name] = net
         return net
 
+    def _stem(self, net: Network) -> str:
+        return re.sub(r"[^a-z0-9]+", "-", net.name.lower()).strip("-")
+
+    def _delete(self, net: Network) -> None:
+        for ext in (".npy", ".json"):
+            (self.folder / f"{self._stem(net)}{ext}").unlink(missing_ok=True)
+
     def _save(self, net: Network) -> None:
         self.folder.mkdir(parents=True, exist_ok=True)
-        stem = re.sub(r"[^a-z0-9]+", "-", net.name.lower()).strip("-")
+        stem = self._stem(net)
         np.save(self.folder / f"{stem}.npy", net.persistence.astype(np.float16))
         (self.folder / f"{stem}.json").write_text(json.dumps({"name": net.name, "games": net.games}))
 
@@ -98,6 +105,11 @@ class NetworkLibrary:
             net = self.networks[name]
             w = min(net.games, self.max_weight)
             merged = (net.persistence * w + persistence) / (w + 1)
+            if hint and name.startswith("Network") and hint not in self.networks:
+                # First time we've read this look's network name off the screen: use it.
+                self._delete(net)
+                del self.networks[name]
+                name = hint
             net = self._put(name, merged, net.games + 1)
         self._save(net)
         return name

@@ -35,6 +35,13 @@ def main() -> None:
             print(f"{d.name}: only {len(files)} stills, skipping")
             continue
         frames = [cv2.imread(str(f)) for f in files]
+        # If the player ignored the seeks, every still is the same frame and *everything* looks
+        # like a permanent overlay. Require the stills to actually differ.
+        small = [cv2.resize(cv2.cvtColor(f, cv2.COLOR_BGR2GRAY), (96, 54)).astype(np.int16) for f in frames]
+        spread = np.median([np.abs(a - b).mean() for i, a in enumerate(small) for b in small[i + 1:]])
+        if spread < 15:
+            print(f"{d.name}: stills barely differ (median difference {spread:.1f}); the seeks probably failed, skipping")
+            continue
         persistence = np.mean([edges(preprocess(f)) for f in frames], axis=0)
         votes = Counter()
         for f in frames:
@@ -64,7 +71,8 @@ def main() -> None:
     if args.dry_run:
         return
     library = NetworkLibrary(CONFIG_DIR / "networks", settings)
-    for name, persistence, hint, _model, _still in games:
+    # Games whose network name could be read go first, so unnamed ones join a named entry.
+    for name, persistence, hint, _model, _still in sorted(games, key=lambda g: g[2] is None):
         print(f"{name} -> {library.learn(persistence, hint)}")
     print("\nlibrary:", {n.name: n.games for n in library.networks.values()})
 
