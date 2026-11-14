@@ -45,6 +45,13 @@ def test_detects_break_and_return():
     assert run(det, broadcast, 200, 203) == State.LIVE
 
 
+def test_region_boxes_are_json_serialisable():
+    import json
+    det = BreakDetector(read_clock=False)
+    run(det, broadcast, 0, 120)
+    json.dumps(det.model.boxes())
+
+
 def test_network_logo_alone_keeps_it_live():
     """Scorebug hidden (side panel, replay graphic) but the network logo is still there."""
     det = BreakDetector(read_clock=False)
@@ -55,8 +62,8 @@ def test_network_logo_alone_keeps_it_live():
 def test_long_break_does_not_erase_overlays():
     det = BreakDetector(read_clock=False)
     run(det, broadcast, 0, 180)
-    assert run(det, scene, 180, 480) == State.BREAK  # 5 minutes of ads
-    assert run(det, broadcast, 480, 484) == State.LIVE
+    assert run(det, scene, 180, 420) == State.BREAK  # 4 minutes of ads
+    assert run(det, broadcast, 420, 424) == State.LIVE
 
 
 def test_halftime_show_with_only_the_logo_is_a_break():

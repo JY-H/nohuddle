@@ -55,6 +55,7 @@ class DetectorSettings:
     # The network logo stays up through halftime shows; the scorebug doesn't. Replays and stat
     # graphics hide the scorebug for well under this long.
     intermission_after: float = 120.0
+    intermission_logo_for: float = 20.0  # ...with the logo continuously up for this long
     # Only relearn while the scorebug is (recently) on screen, so a long halftime or a stretch of
     # ads can't overwrite what the game looks like.
     refit_needs_primary_within: float = 30.0
@@ -124,7 +125,7 @@ class OverlayModel:
 
     def boxes(self) -> list[tuple[int, int, int, int]]:
         """Region bounding boxes (x, y, w, h) in model coordinates, for debugging overlays."""
-        return [(c.start, r.start, c.stop - c.start, r.stop - r.start) for r, c, _ in self.regions]
+        return [(int(c.start), int(r.start), int(c.stop - c.start), int(r.stop - r.start)) for r, c, _ in self.regions]
 
 
 class BreakDetector:
@@ -137,6 +138,7 @@ class BreakDetector:
         self._primary_since: float | None = None
         self._clock_disagrees_since: float | None = None
         self._stuck_since: float | None = None
+        self._overlay_since: float | None = None
         self.relearned = 0  # times the model was thrown away as wrong
         self.history: deque[tuple[float, np.ndarray]] = deque(maxlen=self.s.history_len)
         self.model: OverlayModel | None = None
@@ -184,7 +186,10 @@ class BreakDetector:
             self._last_read = t
             texts = gameclock.read_text(frame_bgr)
             self.clock.update(gameclock.parse(texts), t, [x.s for x in texts])
-        intermission = any_overlay and t - self._primary_seen_at >= self.s.intermission_after
+        self._overlay_since = (self._overlay_since or t) if any_overlay else None
+        # Logo steadily up (not one stray frame that resembles it) while the scorebug's been gone.
+        intermission = (any_overlay and t - self._overlay_since >= self.s.intermission_logo_for
+                        and t - self._primary_seen_at >= self.s.intermission_after)
         if intermission or (self.state == State.BREAK and t - self.since >= self.s.long_break_halftime):
             self.clock.note_intermission(t)
         halftime = self.clock.in_halftime(t, t - self._primary_since if self._primary_since is not None else 0.0)
