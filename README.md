@@ -20,7 +20,7 @@ Needs [uv](https://docs.astral.sh/uv/) and Google Chrome (the app drives your in
 - 👁 shows what the detector sees (green = overlay visible, red = learned but not visible).
 - Keys: `S` panel, `M` single/multi, `F` fullscreen.
 
-Settings and the watchlist live in `~/.config/nfl-watcher/` (along with the Chrome profile and learned overlays).
+Settings, the watchlist, learned overlays, the network library, saved reports and the app's Chrome profile live in `data/` in the checkout (gitignored; it holds your stream site and broadcast frames, so keep it out of git). Set `NFL_WATCHER_DATA` to use another folder; installed elsewhere, the default is `~/.config/nfl-watcher/`.
 
 ## How break detection works
 

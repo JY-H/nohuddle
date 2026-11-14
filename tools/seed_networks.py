@@ -4,7 +4,7 @@
 
 Stills should be spread across a broadcast (different plays, shots and scores), so that only the
 overlays stay put. Each folder becomes an overlay map, the network is read off the logo, and the
-map is folded into ~/.config/nfl-watcher/networks/nfl/ like an NFL game watched live would be.
+map is folded into the app's network library (data/networks/nfl/) like an NFL game watched live would be.
 """
 
 import argparse
