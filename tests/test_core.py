@@ -153,6 +153,10 @@ def test_parse_scorebug_text():
     assert parse(texts("2ND 8:47")).quarter == 2
     assert parse(texts("13", "6:3831")).clock == 398  # clock run into the play clock
     assert parse(texts("3RD", "6.34")).clock == 394
+    assert (parse(texts("DUKE", "3Ro :47", "19")).quarter, parse(texts("3Ro :47")).clock) == (3, 47)  # under a minute
+    assert parse(texts("13", ":25")).clock is None  # a lone play clock
+    assert parse(texts("2ND & GOAL", "3RD", ":47", "34")).clock == 47
+    assert parse(texts("3RD", "6:33", ":25")).clock == 393  # full clock wins over the play clock
     assert parse(texts("3:30 PM ET")).clock is None
     assert parse(texts("HALFTIME")).halftime
     far = parse([Text("3RD", 0.1, 0.9), Text("8:12", 0.9, 0.1)])

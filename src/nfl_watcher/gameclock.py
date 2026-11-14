@@ -26,6 +26,9 @@ SUFFIX = {1: "ST", 2: "ND", 3: "RD", 4: "TH"}
 QUARTER_RE = re.compile(r"(?<![\d:])([1-4])([A-Z0-9]{2})(?![A-Z0-9])")
 # "6:34", "6.34" (OCR), "6:4631" (clock run into the play clock); not "9:30 PM".
 CLOCK_RE = re.compile(r"(?<![\d:.])(\d{1,2})[:.;](\d{2})(?![:.]\d)(?!\s*[AP]\.?M)")
+# Under a minute some scorebugs drop the minutes ("3RD :47"). Only trusted right after the quarter,
+# since a lone ":25" is usually the play clock.
+SUBMINUTE_AFTER_QUARTER_RE = re.compile(r"[^\d:]{0,3}[:;](\d{2})(?![\d:.])")
 OT_RE = re.compile(r"(?<![A-Z])(\d?OT)(?![A-Z])")
 # "2ND & 10", "2ND DOWN", "1ST HALF" - and "2nd.84", which is "2nd & 4" with the & read as an 8.
 NOT_A_QUARTER_AFTER = re.compile(r"[\s.,:;]*(&|AND\b|DOWN\b|HALF\b|TEAM\b|8\s*\d{1,2}\b(?![:.]))")  # "2ND & 10", "2ND DOWN", "1ST HALF"
@@ -63,14 +66,20 @@ class Reading:
         return (self.quarter - 1) * QUARTER_SECONDS + (QUARTER_SECONDS - self.clock)
 
 
-def _quarter_in(s: str) -> int | None:
+def _quarter_match(s: str) -> re.Match | None:
     for m in QUARTER_RE.finditer(s):
         digit, suffix = int(m.group(1)), m.group(2)
         if NOT_A_QUARTER_AFTER.match(s, m.end()):
             continue
         # OCR mangles these ("2N0", "2KD"): accept one wrong character in the suffix.
         if sum(a != b for a, b in zip(suffix, SUFFIX[digit])) <= 1:
-            return digit
+            return m
+    return None
+
+
+def _quarter_in(s: str) -> int | None:
+    if m := _quarter_match(s):
+        return int(m.group(1))
     if OT_RE.search(s):
         return 5
     return None
@@ -86,6 +95,9 @@ def parse(texts: list[Text]) -> Reading:
             mins, secs = int(m.group(1)), int(m.group(2))
             if secs < 60 and mins * 60 + secs <= QUARTER_SECONDS:
                 clocks.append((t, mins * 60 + secs))
+        if (qm := _quarter_match(t.s.upper())) and (sm := SUBMINUTE_AFTER_QUARTER_RE.match(t.s.upper(), qm.end())):
+            if int(sm.group(1)) < 60:
+                clocks.append((t, int(sm.group(1))))
     for t in texts:
         up = t.s.upper()
         if "HALFTIME" in up or re.fullmatch(r"\s*HALF\s*", up):
@@ -96,6 +108,13 @@ def parse(texts: list[Text]) -> Reading:
         # with the quarter seen moments ago (see GameClock.update).
         if len(clocks) == 1:
             r.clock = clocks[0][1]
+    if quarters and not clocks:
+        # "3RD" and ":47" read as separate pieces: take the one read right after the quarter.
+        i = next(i for i, t in enumerate(texts) if t is quarters[0][0])
+        nxt = texts[i + 1] if i + 1 < len(texts) else None
+        if nxt and (m := re.fullmatch(r"\s*[:;](\d{2})\s*", nxt.s)) and int(m.group(1)) < 60 \
+                and ((nxt.x - quarters[0][0].x) ** 2 + (nxt.y - quarters[0][0].y) ** 2) ** 0.5 < 0.1:
+            clocks.append((nxt, int(m.group(1))))
     if quarters:
         qt, r.quarter = quarters[0]
         if clocks:
