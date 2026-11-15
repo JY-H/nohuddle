@@ -201,7 +201,7 @@ function renderPanel() {
     $('#watchlist').innerHTML = state.games.map((g, i) => `
       <li draggable="true" data-id="${esc(g.id)}" class="${g.id === state.active ? 'active' : ''}">
         <span class="grip">⋮⋮</span>
-        <span class="title">${i + 1}. ${esc(g.title)}${g.clock ? ` <small class="clock">${esc(g.clock)}</small>` : ''}${g.network ? ` <small class="clock">· ${esc(g.network)}</small>` : ''}</span>
+        <span class="title"><span class="name">${i + 1}. ${esc(g.title)}</span>${g.clock ? ` <small class="clock">${esc(g.clock)}</small>` : ''}${g.network ? ` <small class="clock">· ${esc(g.network)}</small>` : ''}</span>
         <span>${badge(g, state.now)}</span>
         <span class="actions">
           <button data-act="pin">${g.id === state.pinned ? '📌 Pinned' : 'Watch now'}</button>

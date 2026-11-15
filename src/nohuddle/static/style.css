@@ -52,8 +52,9 @@ body.single .tile-label:hover span { opacity: 1; }
 #watchlist li.active { border-color: var(--accent); }
 #watchlist li.dragging { opacity: .4; }
 #watchlist .grip { cursor: grab; color: var(--muted); grid-row: span 2; text-align: center; }
-#watchlist .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#watchlist .clock { color: var(--muted); font-weight: normal; margin-left: 4px; }
+#watchlist .title { font-weight: 600; display: flex; min-width: 0; white-space: nowrap; }
+#watchlist .title .name { overflow: hidden; text-overflow: ellipsis; }
+#watchlist .clock { color: var(--muted); font-weight: normal; margin-left: 4px; flex-shrink: 0; }
 #watchlist .actions { grid-column: 2 / 4; display: flex; gap: 4px; flex-wrap: wrap; }
 #watchlist .actions button, #watchlist .actions select { padding: 1px 6px; font-size: 12px; }
 .badge { font-size: 11px; padding: 1px 6px; border-radius: 10px; font-weight: 600; white-space: nowrap; }
