@@ -39,6 +39,13 @@ def logo_only(t: float) -> np.ndarray:
     return img
 
 
+def logo_over_panel(t: float) -> np.ndarray:
+    """A break screen that keeps the network logo up: a stats panel, no field."""
+    img = np.full((360, 640, 3), (90, 50, 20), np.uint8)
+    cv2.putText(img, "NET", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+    return img
+
+
 def run(det, frames, t0, t1):
     st = None
     for t in np.arange(t0, t1, 1.0):
@@ -87,9 +94,23 @@ def test_league_feed_logo_alone_is_not_the_game(tmp_path):
         det = BreakDetector(settings, read_clock=False, networks=library.candidates)
         run(det, broadcast, 0, 60)
         assert det.network == name
-        assert run(det, logo_only, 60, 80) == expected  # on FOX, logo-only is a replay
+        assert run(det, logo_over_panel, 60, 80) == expected  # on FOX, logo-only is a replay
+        run(det, broadcast, 80, 100)
+        assert run(det, logo_only, 100, 120) == State.LIVE  # the logo over the field: a replay, anywhere
     assert parse(texts("NEXT GEN", "STATS", "PASSING VS THE BLITZ", "4/7", "6/9")).next_gen_stats
 
+
+
+def test_league_feed_recognised_from_its_scorebug(monkeypatch):
+    """From a session: a world-feed game matched a second, unnamed overlay profile, so the feed's
+    rules didn't apply and a "Team Comparison" panel with the shield kept it on screen. Its
+    scorebug's "WEEK 10" says which feed it is."""
+    monkeypatch.setattr(gameclock, "read_text", lambda frame: texts("KC 21", "ATL 3", "4TH 13:32", "WEEK 10"))
+    det = BreakDetector(read_clock=True)
+    run(det, broadcast, 0, 150)
+    assert det.network is None and det.feed() == "NFL Broadcast"
+    monkeypatch.setattr(gameclock, "read_text", lambda frame: texts("TEAM COMPARISON", "RUSH YARDS", "59", "112"))
+    assert run(det, logo_over_panel, 150, 165) == State.BREAK
 
 def test_next_gen_stats_is_a_break_only_on_the_league_feed(tmp_path, monkeypatch):
     from nohuddle.detector import DetectorSettings

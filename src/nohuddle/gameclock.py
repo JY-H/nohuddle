@@ -204,7 +204,9 @@ NETWORK_PATTERNS = [
     ("Netflix", r"NETFLIX"),
     ("NFL Network", r"NFL\s*NETWORK|\bNFLN\b"),
     ("TNT", r"\bTNT\b"),
-    ("NFL Broadcast", r"GAME\s*BREAK"),  # the league's own feed: no network logo
+    # The league's own feed: no network logo, but its scorebug ends in "WEEK 10" (and its breaks
+    # say "Game Break").
+    ("NFL Broadcast", r"GAME\s*BREAK|\bWEEK\s*\d{1,2}\b"),
 ]
 
 

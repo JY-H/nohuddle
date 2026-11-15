@@ -105,11 +105,13 @@ class NetworkLibrary:
             net = self.networks[name]
             w = min(net.games, self.max_weight)
             merged = (net.persistence * w + persistence) / (w + 1)
-            if hint and name.startswith("Network") and hint not in self.networks:
-                # First time we've read this look's network name off the screen: use it.
+            if hint and name.startswith("Network"):
+                # First time we've read this look's network name off the screen: use it (numbered,
+                # if another look of that network already has it).
                 self._delete(net)
                 del self.networks[name]
-                name = hint
+                name = hint if hint not in self.networks else \
+                    next(f"{hint} ({i})" for i in range(2, 100) if f"{hint} ({i})" not in self.networks)
             net = self._put(name, merged, net.games + 1)
         self._save(net)
         return name

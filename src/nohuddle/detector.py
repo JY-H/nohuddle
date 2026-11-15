@@ -61,6 +61,10 @@ class DetectorSettings:
     mute_after: float = 1.0
     # Networks whose logo stays on screen through their breaks, so it isn't a sign of the game.
     logo_stays_through_breaks: frozenset[str] = frozenset({"NFL Broadcast"})
+    # ...there, the logo counts over this much field (the last few frames' average). Measured on
+    # its breaks (panels, crowd, stadium): <=0.14; on its replays: 0.17-0.66, mostly >0.29.
+    logo_with_field: float = 0.2
+    network_name_votes: int = 5  # sightings of a network's name before it's taken as the network
     live_after: float = 2.0  # seconds with an overlay back before declaring live
     # The network logo stays up through halftime shows; the scorebug doesn't. Replays and stat
     # graphics hide the scorebug for well under this long.
@@ -185,6 +189,7 @@ class BreakDetector:
         self._stuck_since: float | None = None
         self._overlay_since: float | None = None
         self._recent_overlays: deque[tuple[float, bool]] = deque()
+        self._turf: deque[float] = deque(maxlen=3)  # field share of the last few frames
         self.relearned = 0  # times the model was thrown away as wrong
         self.history: deque[tuple[float, np.ndarray]] = deque(maxlen=self.s.history_len)
         self.model: OverlayModel | None = None
@@ -215,6 +220,12 @@ class BreakDetector:
         if self.model is None or not self.model.regions:
             return False  # nothing learned to go on: ads (or a pregame show) as likely as the game
         return not self._pregame(t) and t - max(self.since, self._first_seen) >= self.s.unverified_grace
+
+    def feed(self) -> str | None:
+        """Which network this is: the one whose name keeps being read off the screen, else the
+        one whose overlays it matched."""
+        top = self.network_votes.most_common(1)
+        return top[0][0] if top and top[0][1] >= self.s.network_name_votes else self.network
 
     def fading(self, t: float) -> bool:
         """Still live, but nothing from the game has been on screen for a moment: probably the
@@ -250,10 +261,13 @@ class BreakDetector:
 
         self.last_scores = self.model.scores(grey) if learned else []
         any_overlay = any(sc >= self.s.region_match for sc in self.last_scores)
-        if learned and self.network in self.s.logo_stays_through_breaks:
-            # This feed keeps its logo up through breaks (stadium shots, stat panels): only the
-            # scorebug says it's the game.
-            any_overlay = scorebug_up(self.last_scores, self.model.primary, self.s)
+        if learned and self.feed() in self.s.logo_stays_through_breaks:
+            # This feed keeps its logo up through breaks (stadium shots, stat panels), so the logo
+            # alone isn't the game - the logo over the field is (a replay), and the scorebug is.
+            from .football import field_share  # this rule is for the NFL's own feed
+            self._turf.append(field_share(frame_bgr, min_saturation=30))
+            on_field = float(np.mean(self._turf)) >= self.s.logo_with_field
+            any_overlay = scorebug_up(self.last_scores, self.model.primary, self.s) or (any_overlay and on_field)
         if learned and self.last_scores[self.model.primary] >= self.s.region_match:
             self._primary_seen_at = t
             self._primary_since = self._primary_since if self._primary_since is not None else t
@@ -293,7 +307,7 @@ class BreakDetector:
         # ...and on the NFL's own feed, its "Next Gen Stats" graphics, which fill its breaks
         # (other networks show them during play too).
         panel = recent(self.clock.break_panel_at) or (
-            recent(self.clock.next_gen_at) and self.network in self.s.logo_stays_through_breaks)
+            recent(self.clock.next_gen_at) and self.feed() in self.s.logo_stays_through_breaks)
         if panel:
             stale, stale_hides = "break screen", True
         clock_live = self.clock.live(t, within=self.s.read_clock_every + 0.5)  # just the latest reading

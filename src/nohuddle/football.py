@@ -24,11 +24,11 @@ class FieldSettings:
     back_after: int = 3  # frames of overlays in a row before the allowance resets
 
 
-def field_share(frame_bgr: np.ndarray) -> float:
-    """Share of the frame that's field green."""
+def field_share(frame_bgr: np.ndarray, min_saturation: int = 50) -> float:
+    """Share of the frame that's field green. (Some turf, e.g. MetLife's, is greyer: ~45.)"""
     hsv = cv2.cvtColor(cv2.resize(frame_bgr, (160, 90), interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2HSV)
     h, s, v = hsv[..., 0], hsv[..., 1], hsv[..., 2]
-    return float(((h >= 30) & (h <= 90) & (s >= 50) & (v >= 40)).mean())
+    return float(((h >= 30) & (h <= 90) & (s >= min_saturation) & (v >= 40)).mean())
 
 
 def yard_lines(frame_bgr: np.ndarray) -> int:
