@@ -63,6 +63,7 @@ class Reading:
     halftime: bool = False
     words: set[str] = field(default_factory=set)
     break_panel: bool = False  # a break screen with the game shrunk into a box (see BREAK_PANEL_RE)
+    next_gen_stats: bool = False  # a "Next Gen Stats" graphic: the NFL's own feed shows them in breaks
 
     def elapsed(self, period: int) -> int | None:
         """Game seconds elapsed, for periods of `period` seconds (overtime counts on from the end)."""
@@ -110,6 +111,7 @@ def _drop_down_and_distance(texts: list[Text]) -> list[Text]:
 # Breaks that keep the game in a box: the NFL world feed's "Game Break" screen, CBS's "Eye on the
 # Field" split screen (an ad beside the game).
 BREAK_PANEL_RE = re.compile(r"\bGAME\s*BREAK\b|\bEYE\s*ON\s*THE\s*FIELD\b")
+NEXT_GEN_RE = re.compile(r"NEXT\s*GEN\b")
 PREVIEW_RE = re.compile(r"COMING\s*UP|UP\s*NEXT|STILL\s*TO\s*COME|AHEAD\s*ON")
 
 
@@ -120,6 +122,8 @@ def parse(texts: list[Text]) -> Reading:
     if any(BREAK_PANEL_RE.search(t.s) for t in texts):
         # The scorebug in the panel's corner is the game's, but frozen for the break: not live.
         return Reading(break_panel=True)
+    if any(NEXT_GEN_RE.search(t.s) for t in texts):
+        return Reading(next_gen_stats=True)  # a stats graphic: nothing on it is the game clock
     downs = {int(m.group(0)[0]) for t in texts for m in DOWN_DISTANCE_RE.finditer(t.s)}
     texts = _drop_down_and_distance(texts)
     if len({m.group(0)[:5] for m in STAT_PANEL_RE.finditer(" | ".join(t.s for t in texts))}) >= 2:
@@ -163,7 +167,8 @@ def parse(texts: list[Text]) -> Reading:
         qt = quarters[0][0]
         i = next(i for i, t in enumerate(texts) if t is qt)
         for nb in (texts[i + 1] if i + 1 < len(texts) else None, texts[i - 1] if i > 0 else None):
-            if nb and (m := re.fullmatch(r"\s*[:;](\d{2})\s*", nb.s)) and int(m.group(1)) < 60 \
+            # (the colon is sometimes read as "1" or "$": ":32" -> "132" - fine right next to the quarter)
+            if nb and (m := re.fullmatch(r"\s*[:;1I$](\d{2})\s*", nb.s)) and int(m.group(1)) < 60 \
                     and ((nb.x - qt.x) ** 2 + (nb.y - qt.y) ** 2) ** 0.5 < 0.1:
                 clocks.append((nb, int(m.group(1))))
                 break
@@ -197,7 +202,7 @@ NETWORK_PATTERNS = [
     ("Netflix", r"NETFLIX"),
     ("NFL Network", r"NFL\s*NETWORK|\bNFLN\b"),
     ("TNT", r"\bTNT\b"),
-    ("NFL World Feed", r"GAME\s*BREAK"),  # the league's international feed: no network logo
+    ("NFL Broadcast", r"GAME\s*BREAK"),  # the league's own feed: no network logo
 ]
 
 
@@ -264,6 +269,8 @@ class ClockSettings:
     resume_slack: float = 30.0  # game seconds a lone reading may differ from where we were and still count
     big_jump: float = 60.0  # moving the position further ahead than this needs a running clock
     half_end_window: float = 120.0  # game seconds before the half in which a long break can be halftime
+    halftime_graphic_within: float = 10.0  # game seconds before the half in which "HALFTIME" counts
+    half_not_over_slack: int = 5  # a halftime ends on 2nd-quarter time this close to where it stopped
     verdict_ttl: float = 8.0  # how long a single reading's verdict stands
     min_halftime: float = 12 * 60  # fallback when the clock can't be read: NFL ~13 min
     halftime_resume_scorebug: float = 30.0  # ...and the scorebug back this long
@@ -299,6 +306,7 @@ class GameClock:
         self._quarter: tuple[float, int, int] | None = None  # (wall time, quarter, clock) last read
         self._halftime_hint: float | None = None
         self.break_panel_at: float | None = None  # last read a "Game Break" screen
+        self.next_gen_at: float | None = None  # last read a "Next Gen Stats" graphic
         self._verdict: tuple[float, str] | None = None  # (wall time, "live" | "highlight" | "other game")
         self.display = ""  # e.g. "Q2 1:21", the last live reading
         self._confirmed_live_at = -1e9
@@ -355,11 +363,13 @@ class GameClock:
             if possible < self._half:
                 self.halftime_since, self.halftime_done = None, False
         self.break_panel_at = t if r.break_panel else None  # cleared by the next read without it
+        self.next_gen_at = t if r.next_gen_stats else None
         # The clock decides (2ND 0:00, or a long break at the very end of the half - see
         # note_intermission). A "HALFTIME" graphic (not a "coming up" promo, see parse()) only
-        # counts in the last minutes of the half, or when there's no clock to go by.
+        # counts in the last seconds of the half, or when there's no clock to go by: sponsors'
+        # "Verizon Halftime" bumpers run in the timeouts before it.
         clock_says = (self.readable and self.max_elapsed is not None
-                      and self.max_elapsed < self._half - self.s.half_end_window)
+                      and self.max_elapsed < self._half - self.s.halftime_graphic_within)
         if r.halftime and not clock_says:
             if self._halftime_hint is not None and t - self._halftime_hint <= self.s.confirm_window:
                 self._start_halftime(t, by_clock=True)
@@ -420,9 +430,9 @@ class GameClock:
             return
         self._confirmed_live_at = t
         if (self.halftime_since is not None and r.quarter == self.s.periods_per_half and r.clock > 0
-                and e >= self.max_elapsed):
-            # Agreeing readings of the 2nd-quarter clock where we left it (stopped for the break) or
-            # further on: the half isn't over. A promo for the halftime show during the last break of
+                and e >= self.max_elapsed - self.s.half_not_over_slack):
+            # Agreeing readings of the 2nd-quarter clock where we left it (stopped for the break; give
+            # or take a misread second or two) or further on: the half isn't over. A promo for the halftime show during the last break of
             # the half isn't halftime. (Replays in the halftime show repeat earlier time.)
             self.log.append({"t": round(t, 1), "resync": None, "was": self.max_elapsed, "why": "half not over"})
             self.halftime_since = None

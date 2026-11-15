@@ -59,6 +59,8 @@ class DetectorSettings:
     # ...but mute after this long: on ad-free NFL broadcast, 1s muted once in 12 min (a close-up),
     # going quiet straight away 8 times (mostly for a second).
     mute_after: float = 1.0
+    # Networks whose logo stays on screen through their breaks, so it isn't a sign of the game.
+    logo_stays_through_breaks: frozenset[str] = frozenset({"NFL Broadcast"})
     live_after: float = 2.0  # seconds with an overlay back before declaring live
     # The network logo stays up through halftime shows; the scorebug doesn't. Replays and stat
     # graphics hide the scorebug for well under this long.
@@ -248,6 +250,10 @@ class BreakDetector:
 
         self.last_scores = self.model.scores(grey) if learned else []
         any_overlay = any(sc >= self.s.region_match for sc in self.last_scores)
+        if learned and self.network in self.s.logo_stays_through_breaks:
+            # This feed keeps its logo up through breaks (stadium shots, stat panels): only the
+            # scorebug says it's the game.
+            any_overlay = scorebug_up(self.last_scores, self.model.primary, self.s)
         if learned and self.last_scores[self.model.primary] >= self.s.region_match:
             self._primary_seen_at = t
             self._primary_since = self._primary_since if self._primary_since is not None else t
@@ -283,7 +289,11 @@ class BreakDetector:
         stale_hides = stale is not None and self.clock.around_halftime()
         # A break screen with the game in a box beside it ("Game Break", "Eye on the Field"): its
         # scorebug is still readable, but it's a break.
-        panel = self.clock.break_panel_at is not None and t - self.clock.break_panel_at <= 2 * self.s.read_clock_every + 0.5
+        recent = lambda at: at is not None and t - at <= 2 * self.s.read_clock_every + 0.5
+        # ...and on the NFL's own feed, its "Next Gen Stats" graphics, which fill its breaks
+        # (other networks show them during play too).
+        panel = recent(self.clock.break_panel_at) or (
+            recent(self.clock.next_gen_at) and self.network in self.s.logo_stays_through_breaks)
         if panel:
             stale, stale_hides = "break screen", True
         clock_live = self.clock.live(t, within=self.s.read_clock_every + 0.5)  # just the latest reading

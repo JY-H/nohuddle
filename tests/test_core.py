@@ -71,6 +71,42 @@ def test_league_feed_game_break_panel_is_a_break(monkeypatch):
     # CBS's "Eye on the Field": an ad beside the game in a box, its scorebug readable
     assert parse(texts("EYE ONTHE FIELD", "Uber Eats", "2ND 2:14", "CBS SPORTS")).break_panel
 
+
+def test_league_feed_logo_alone_is_not_the_game(tmp_path):
+    """From a report: the NFL's own feed keeps its shield up through breaks - stadium shots and
+    stat panels ("Team Comparison", "Passing vs the Blitz") - which kept the game on screen."""
+    from nohuddle.detector import DetectorSettings
+    from nohuddle.networks import NetworkLibrary
+
+    settings = DetectorSettings()
+    first = BreakDetector(settings, read_clock=False)
+    run(first, broadcast, 0, 120)
+    for name, expected in (("NFL Broadcast", State.BREAK), ("FOX", State.LIVE)):
+        library = NetworkLibrary(tmp_path / name, settings)
+        library.learn(first.model.persistence, name)
+        det = BreakDetector(settings, read_clock=False, networks=library.candidates)
+        run(det, broadcast, 0, 60)
+        assert det.network == name
+        assert run(det, logo_only, 60, 80) == expected  # on FOX, logo-only is a replay
+    assert parse(texts("NEXT GEN", "STATS", "PASSING VS THE BLITZ", "4/7", "6/9")).next_gen_stats
+
+
+def test_next_gen_stats_is_a_break_only_on_the_league_feed(tmp_path, monkeypatch):
+    from nohuddle.detector import DetectorSettings
+    from nohuddle.networks import NetworkLibrary
+
+    settings = DetectorSettings()
+    first = BreakDetector(settings, read_clock=False)
+    run(first, broadcast, 0, 120)
+    for name, expected in (("NFL Broadcast", State.BREAK), ("CBS", State.LIVE)):
+        library = NetworkLibrary(tmp_path / name, settings)
+        library.learn(first.model.persistence, name)
+        monkeypatch.setattr(gameclock, "read_text", lambda frame: texts("MIN 17", "2ND 1:56", "GB 0"))
+        det = BreakDetector(settings, networks=library.candidates)
+        run(det, broadcast, 0, 60)
+        monkeypatch.setattr(gameclock, "read_text", lambda frame: texts("NEXT GEN STATS", "PASSING VS THE BLITZ"))
+        assert run(det, broadcast, 60, 75) == expected
+
 def test_going_quiet_before_the_break_is_called():
     det = BreakDetector(read_clock=False)
     run(det, broadcast, 0, 120)
@@ -246,6 +282,15 @@ def test_down_and_distance_misreads_are_not_the_quarter():
     assert (r.quarter, r.clock) == (4, 441)
     r = parse(at(("< 1ST", 0.2), ("10", 0.25), ("7:21", 0.33), ("4TH", 0.34), ("1ST & 10", 0.4), ("35", 0.45)))
     assert (r.quarter, r.clock) == (4, 441)
+
+
+def test_sub_minute_clock_with_the_colon_misread():
+    """From a report: FOX's ":32" next to "2ND" was read as "132" (and "$13"): no clock at all."""
+    def at(*items):
+        return [Text(s, x, 0.9) for s, x in items]
+    assert (parse(at(("13", 0.30), ("132", 0.40), ("2ND", 0.43))).quarter, parse(at(("13", 0.30), ("132", 0.40), ("2ND", 0.43))).clock) == (2, 32)
+    assert parse(at(("$13", 0.40), ("2ND", 0.43))).clock == 13
+    assert parse(at(("118", 0.10), ("2ND", 0.43))).clock is None  # not next to the quarter: a yardage
 
 def reading(q, clock, words=("DUKE", "MIAMI")):
     return Reading(q, clock, words=set(words))
@@ -688,15 +733,27 @@ def test_halftime_bumper_late_in_the_half_is_not_halftime():
     c.update(promo, t + 20)
     c.update(promo, t + 22)
     assert not c.in_halftime(t + 22, 0)
-    c.update(Reading(halftime=True), t + 24)  # a halftime graphic this close to the end could be it
+    # From another report: a sponsor's "Verizon Halftime" bumper in the timeout at Q2 0:23 - with
+    # 33s left, a halftime graphic isn't halftime either; only in the last 10s.
+    c.update(Reading(halftime=True), t + 24)
     c.update(Reading(halftime=True), t + 26)
-    assert c.in_halftime(t + 26, 0)
-    c.update(reading(2, 33), t + 90)
-    c.update(reading(2, 33), t + 94)  # back from the break, clock still stopped where it was
+    assert not c.in_halftime(t + 26, 0)
+    c.note_intermission(t + 30)  # but a long break this close to the end could be
+    assert c.in_halftime(t + 30, 0)
+    c.update(reading(2, 35), t + 90)
+    c.update(reading(2, 35), t + 94)  # back from the break, the stopped clock read 2s off: not over
     assert not c.in_halftime(t + 94, 4)
     assert not promo.halftime
     assert parse(texts("VERIZON HALFTIME", "DETROIT 21", "NEW ENGLAND 3")).halftime
 
+
+
+def test_halftime_graphic_in_the_last_seconds_counts():
+    c = GameClock()
+    t = feed(c, 2, 20, 0, 14)  # Q2 0:20 -> 0:08, then the clock runs out unread
+    c.update(Reading(halftime=True), t + 20)
+    c.update(Reading(halftime=True), t + 22)
+    assert c.in_halftime(t + 22, 0)
 
 
 def test_halftime_graphic_mid_half_is_ignored_when_the_clock_reads():

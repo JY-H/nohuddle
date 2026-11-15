@@ -67,6 +67,7 @@ NETWORK_LEARN_EVERY = 600.0  # fold a game's proven overlays into its network's 
 # Only NFL games share learned overlays: other leagues (college especially) are on different
 # networks and graphics packages, so each of their games learns on its own.
 LIBRARY_LEAGUES = {"nfl"}
+NETWORK_NAME_VOTES = 5  # sightings of a network's name before a learned look is named after it
 
 # Runs in every frame (including the stream players) before any page script.
 ANTI_POPUP_JS = """
@@ -255,7 +256,10 @@ class Controller:
         np.save(path, d.model.persistence.astype(np.float16))
         w.saved_version = d.model_version
         if w.game.league in LIBRARY_LEAGUES and time.time() - w.network_learned_at >= NETWORK_LEARN_EVERY:
-            hint = d.network_votes.most_common(1)[0][0] if d.network_votes else None
+            # Name it after the network read off the screen - if read often enough: a promo for
+            # another network's game ("Sunday Night Football") is a couple of sightings.
+            top = d.network_votes.most_common(1)
+            hint = top[0][0] if top and top[0][1] >= NETWORK_NAME_VOTES else None
             d.network = self.library.learn(d.model.persistence, hint)
             w.network_learned_at = time.time()
             log.info("%s looks like %s", w.game.title, d.network)
