@@ -54,6 +54,18 @@ def test_detects_break_and_return():
     assert run(det, broadcast, 200, 203) == State.LIVE
 
 
+
+def test_going_quiet_before_the_break_is_called():
+    det = BreakDetector(read_clock=False)
+    run(det, broadcast, 0, 120)
+    plain = np.full((360, 640, 3), 60, np.uint8)  # nothing on it that could pass for an overlay
+    det.observe(plain, 120.0)
+    assert not det.fading(120)  # one empty frame: could be anything
+    det.observe(plain, 121.0)
+    assert det.fading(121) and det.state == State.LIVE  # muted, still on screen
+    det.observe(broadcast(122), 122.0)
+    assert not det.fading(122)  # back: sound back
+
 def test_region_boxes_are_json_serialisable():
     import json
     det = BreakDetector(read_clock=False)
@@ -562,7 +574,7 @@ def test_feed_without_graphics_stays_on_screen_while_the_field_is_shown():
     det = BreakDetector(read_clock=False, extras=NFL.make_extras())
     run(det, broadcast, 0, 150)
     assert run(det, yard_lined_field, 150, 300) == State.LIVE
-    assert run(det, scene, 300, 310) == State.BREAK
+    assert run(det, lambda t: np.full((360, 640, 3), 60, np.uint8), 300, 310) == State.BREAK  # an ad
 
 
 def test_logo_only_mid_quarter_is_not_halftime(monkeypatch):

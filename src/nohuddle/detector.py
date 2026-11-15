@@ -56,6 +56,9 @@ class DetectorSettings:
     # switched away no more than 4s did (2s added a false switch on a close-up), and leaves ads
     # a second sooner.
     break_after: float = 3.0
+    # ...but mute after this long: on ad-free NFL broadcast, 1s muted once in 12 min (a close-up),
+    # going quiet straight away 8 times (mostly for a second).
+    mute_after: float = 1.0
     live_after: float = 2.0  # seconds with an overlay back before declaring live
     # The network logo stays up through halftime shows; the scorebug doesn't. Replays and stat
     # graphics hide the scorebug for well under this long.
@@ -210,6 +213,11 @@ class BreakDetector:
         if self.model is None or not self.model.regions:
             return False  # nothing learned to go on: ads (or a pregame show) as likely as the game
         return not self._pregame(t) and t - max(self.since, self._first_seen) >= self.s.unverified_grace
+
+    def fading(self, t: float) -> bool:
+        """Still live, but nothing from the game has been on screen for a moment: probably the
+        start of a break. Worth muting before it's certain enough to switch away."""
+        return self.state == State.LIVE and self._absent_since is not None and t - self._absent_since >= self.s.mute_after
 
     def _pregame(self, t: float) -> bool:
         """Before the scheduled start with no game clock read yet: the pregame show (and its ads),

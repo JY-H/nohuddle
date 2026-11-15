@@ -176,6 +176,7 @@ class Controller:
             game = Game(g["id"], g["title"], g["url"], g.get("league", ""), g.get("starts_at", 0), g.get("ends_at", 0), g.get("embeds", []))
             self._add(game, g.get("embed_index", 0))
         self.active: str | None = None
+        self._hushed = False  # the active game is muted early, ahead of a likely break
         self.pinned: str | None = None
         self.events: list[dict] = []
         self.page: Page | None = None
@@ -458,6 +459,10 @@ class Controller:
         if not self.auto and self.active in self.priority:
             return
         new = scheduler.choose(self.priority, self._showable(), self.pinned)
+        hushed = new is not None and self.watched[new].detector.fading(time.time())
+        if hushed != self._hushed:
+            self._hushed = hushed  # the game with sound looks to be going to a break: mute it already
+            asyncio.ensure_future(self._apply_audio())
         if new != self.active:
             old = self.active
             self.active = new
@@ -473,7 +478,7 @@ class Controller:
         frames = await self._game_frames()
         for gid, f in frames.items():
             try:
-                await f.evaluate(SET_MUTED_JS, gid != self.active)
+                await f.evaluate(SET_MUTED_JS, gid != self.active or self._hushed)
             except Exception:
                 pass
 
