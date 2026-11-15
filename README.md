@@ -36,7 +36,7 @@ Learned overlays are saved per game and source, so restarting mid-game (or mid-h
 
 ### Per-sport behaviour
 
-The detector and game clock are sport-agnostic. `sports.py` maps each league to a profile: period length (NFL/college football 15 min, NBA 12, WNBA 10, college basketball 20-minute halves), the halftime fallback, and any sport-specific rules to plug in. Rules tuned for one sport live in their own module and only attach to that sport: `basketball.py` keeps overlay-free replays on screen when the picture still looks like the game (basketball replays often drop the scorebug *and* logo); football doesn't use it.
+The detector and game clock are sport-agnostic. `sports.py` maps each league to a profile: period length (NFL/college football 15 min, NBA 12, WNBA 10, college basketball 20-minute halves), the halftime fallback, and any sport-specific rules to plug in. Rules tuned for one sport live in their own module and only attach to that sport: `basketball.py` keeps overlay-free replays on screen when the picture still matches the broadcast's learned colours; `football.py` does the same when the picture is mostly field green (replays and highlight packages), which needs no learning. Both are capped at 45s after the game was last clearly on screen.
 
 ### Game clock (macOS)
 

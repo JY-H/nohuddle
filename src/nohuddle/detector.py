@@ -277,6 +277,10 @@ class BreakDetector:
                 return self._set(State.BREAK, t)
             if clock_live:
                 return self._set(State.LIVE, t)
+            if any(extra_votes):
+                # Still learning, but the sport's own evidence says it's the game (e.g. a highlight
+                # package with no scorebug): keep it on screen.
+                return self._set(State.LIVE, t)
             if self.clock.readable and not self.clock.live(t, within=self.s.learning_clock_window):
                 # Nothing learned yet, but this scorebug can be read and it isn't on screen: an ad,
                 # most likely. Don't show it while we wait.

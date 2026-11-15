@@ -10,6 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from .basketball import ReplayByLook
+from .football import FieldOnScreen
 
 
 @dataclass(frozen=True)
@@ -24,8 +25,8 @@ class Sport:
         return [make() for make in self.extras]
 
 
-NFL = Sport("NFL", 15 * 60, 2, 12 * 60)  # halftime ~13 min
-COLLEGE_FOOTBALL = Sport("college football", 15 * 60, 2, 18 * 60)  # halftime usually 20 min
+NFL = Sport("NFL", 15 * 60, 2, 12 * 60, extras=(FieldOnScreen,))  # halftime ~13 min
+COLLEGE_FOOTBALL = Sport("college football", 15 * 60, 2, 18 * 60, extras=(FieldOnScreen,))  # halftime ~20 min
 NBA = Sport("NBA", 12 * 60, 2, 13 * 60, extras=(ReplayByLook,))  # halftime 15 min
 WNBA = Sport("WNBA", 10 * 60, 2, 13 * 60, extras=(ReplayByLook,))
 COLLEGE_BASKETBALL = Sport("college basketball", 20 * 60, 1, 13 * 60, extras=(ReplayByLook,))

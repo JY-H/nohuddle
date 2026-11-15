@@ -449,12 +449,22 @@ def test_ad_blip_does_not_flip_a_readable_game_live(monkeypatch):
     assert run(det, broadcast, 240, 244) == State.LIVE
 
 
-def test_replay_rule_is_off_for_football():
+def test_basketball_rule_is_not_used_for_football():
+    from nohuddle.basketball import ReplayByLook
     from nohuddle.sports import NFL, COLLEGE_FOOTBALL
-    assert not NFL.make_extras() and not COLLEGE_FOOTBALL.make_extras()
+    for sport in (NFL, COLLEGE_FOOTBALL):
+        assert not any(isinstance(x, ReplayByLook) for x in sport.make_extras())
+
+
+def test_football_highlight_on_the_field_stays_on_screen():
+    from nohuddle.sports import NFL
     det = BreakDetector(read_clock=False, extras=NFL.make_extras())
     run(det, broadcast, 0, 150)
-    assert run(det, field, 150, 165) == State.BREAK
+    assert run(det, field, 150, 175) == State.LIVE  # replay/highlight: no overlays, but a field
+    assert run(det, broadcast, 175, 180) == State.LIVE
+    assert run(det, scene, 180, 190) == State.BREAK  # an ad (not field green) still goes to break
+    run(det, broadcast, 190, 210)
+    assert run(det, field, 210, 270) == State.BREAK  # and the allowance runs out
 
 
 def test_nba_clock_uses_12_minute_quarters():

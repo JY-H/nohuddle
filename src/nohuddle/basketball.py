@@ -1,8 +1,8 @@
 """Basketball-only break detection.
 
-Kept out of the core detector on purpose: these rules were tuned on basketball broadcasts and
-made football worse (football replays keep the network logo up, so they never needed this, and the
-extra evidence only added ways for an ad to look live).
+Kept out of the core detector on purpose: this learned colour signature made football worse (an ad
+that briefly looked like an overlay taught it the ad's colours). Football has its own, learning-free
+rule in football.py.
 """
 
 from collections import deque
