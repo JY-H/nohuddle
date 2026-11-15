@@ -95,6 +95,10 @@ AD_HOST_PATTERNS = [
     "popads", "popcash", "propellerads", "adsterra", "exoclick", "juicyads", "hilltopads",
     "onclickads", "clickadu", "adcash", "doubleclick", "googlesyndication", "sharethis",
 ]
+DEFAULT_FANTASYCAST = "https://fantasy.espn.com/football/fantasycast"
+# ESPN only lets its own sites frame its pages; inside the app's own browser we lift that for ESPN,
+# so Fantasycast can sit in a drawer next to the games.
+ESPN_RE = re.compile(r"^https://([^/]*\.)?(espn\.com|go\.com|espncdn\.com)/")
 EMBED_AD_DOMAIN_RE = re.compile(r'"(?:adserverDomain|cdnDomain)"\s*:\s*"([a-z0-9.-]+)"', re.I)
 
 
@@ -133,6 +137,9 @@ class Controller:
         self.league = league or cfg.get("league", "nfl")
         self.auto = cfg.get("auto", True)
         self.mode = cfg.get("mode", "single")  # "single" or "multi"
+        self.fantasycast_url = cfg.get("fantasycast_url", DEFAULT_FANTASYCAST)
+        self._allowed_pages: set = set()  # pages we opened on purpose (ESPN login), exempt from popup blocking
+        self._expecting_page = False
         s = cfg.get("settings", {})
         self.settings = DetectorSettings(
             break_after=s.get("break_after", DetectorSettings.break_after),
@@ -158,6 +165,7 @@ class Controller:
     def save(self) -> None:
         cfg = {
             "site": self.site.base_url, "league": self.league, "auto": self.auto, "mode": self.mode,
+            "fantasycast_url": self.fantasycast_url,
             "settings": {"break_after": self.settings.break_after, "live_after": self.settings.live_after},
             "watchlist": [{**self.watched[g].game.to_json(), "embed_index": self.watched[g].embed_index} for g in self.priority],
         }
@@ -267,7 +275,11 @@ class Controller:
         await ctx.add_init_script(ANTI_POPUP_JS)
 
         def on_page(p: Page) -> None:
-            if p is not self.page:
+            if self._expecting_page:  # one we're opening on purpose (ESPN login)
+                self._expecting_page = False
+                self._allowed_pages.add(p)
+                return
+            if p is not self.page and p not in self._allowed_pages:
                 log.info("Blocked popup: %s", p.url)
                 asyncio.ensure_future(p.close())
         ctx.on("page", on_page)
@@ -275,6 +287,29 @@ class Controller:
         await ctx.route(re.compile("|".join(AD_HOST_PATTERNS)), lambda r: r.abort())
         # Player pages declare their ad servers in a config blob; read it and block them.
         await ctx.route(re.compile(r"/embed/"), self._inspect_embed)
+        await ctx.route(ESPN_RE, self._allow_espn_framing)
+        await self._share_espn_login()
+
+    async def _allow_espn_framing(self, route: Route) -> None:
+        if route.request.resource_type not in ("document", "iframe"):
+            await route.fallback()
+            return
+        try:
+            resp = await route.fetch()
+        except Exception:
+            await route.fallback()
+            return
+        headers = {k: v for k, v in resp.headers.items() if k.lower() not in ("content-security-policy", "x-frame-options")}
+        await route.fulfill(response=resp, headers=headers)
+
+    async def _share_espn_login(self) -> None:
+        """ESPN's login cookies default to first-party only, so the Fantasycast drawer (an embedded
+        frame) would look logged out. In the app's own browser, let them be sent there too."""
+        cookies = [c for c in await self.ctx.cookies() if re.search(r"(espn|go)\.com$", c["domain"])]
+        fixed = [{**c, "sameSite": "None", "secure": True} for c in cookies if c.get("sameSite") != "None"]
+        if fixed:
+            await self.ctx.add_cookies(fixed)
+            log.info("Made %d ESPN login cookies available to the Fantasycast drawer", len(fixed))
 
     async def _inspect_embed(self, route: Route) -> None:
         if route.request.resource_type != "document":
@@ -462,6 +497,7 @@ class Controller:
             "now": now, "active": self.active, "pinned": self.pinned, "auto": self.auto, "mode": self.mode,
             "visible": self._visible(),
             "site": self.site.base_url, "league": self.league, "events": self.events,
+            "fantasycast_url": self.fantasycast_url,
             "settings": {"break_after": self.settings.break_after, "live_after": self.settings.live_after},
             "games": [
                 {
@@ -498,6 +534,7 @@ class Controller:
         r.add_get("/api/debug/{gid:.+}.png", self._api_debug)
         r.add_get("/api/debug/{gid:.+}.json", self._api_debug_json)
         r.add_post("/api/report", self._api_report)
+        r.add_post("/api/espn-login", self._api_espn_login)
         return app
 
     async def _api_games(self, req: web.Request) -> web.Response:
@@ -587,7 +624,25 @@ class Controller:
                 setattr(self.settings, key, max(0.5, float(body[key])))
         if body.get("site"):
             self.site.base_url = body["site"].rstrip("/")
+        if "fantasycast_url" in body:
+            url = body["fantasycast_url"].strip()
+            self.fantasycast_url = url if ESPN_RE.match(url) else DEFAULT_FANTASYCAST
         self.save()
+        return web.json_response({"ok": True})
+
+    async def _api_espn_login(self, req: web.Request) -> web.Response:
+        """Open ESPN in a normal tab to log in (logging in inside the drawer may not stick); when
+        it's closed, make the login usable in the drawer."""
+        self._expecting_page = True
+        page = await self.ctx.new_page()
+        self._allowed_pages.add(page)
+
+        async def closed(*_):
+            self._allowed_pages.discard(page)
+            await self._share_espn_login()
+        page.on("close", lambda *_: asyncio.ensure_future(closed()))
+        await page.goto(self.fantasycast_url)
+        await page.bring_to_front()
         return web.json_response({"ok": True})
 
     def _debug_info(self, w: Watched) -> dict:

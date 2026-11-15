@@ -17,3 +17,7 @@ wheels/
 # App data: settings (incl. your stream site), learned overlays, reports with broadcast frames,
 # and the app's Chrome profile. Never commit.
 /data/
+
+# Local environment files. Never commit.
+.env
+.env.*

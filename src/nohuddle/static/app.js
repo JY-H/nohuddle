@@ -221,6 +221,7 @@ function renderPanel() {
     $('#break_after').value = state.settings.break_after;
     $('#live_after').value = state.settings.live_after;
     $('#site').value = state.site;
+    $('#fantasycast_url').value = state.fantasycast_url;
   }
 
   $('#events').innerHTML = [...state.events].reverse().map((e) =>
@@ -278,8 +279,24 @@ $('#chime').checked = chimeOn();
 $('#chime').onchange = (e) => localStorage.setItem('chime', e.target.checked ? 'on' : 'off');
 $('#panel-toggle').onclick = () => document.body.classList.toggle('panel-hidden');
 $('#drawer-toggle').onclick = toggleDrawer;
+
+// ESPN Fantasycast drawer (loaded the first time it's opened).
+function toggleFantasy() {
+  const open = $('#fantasy').hidden;
+  $('#fantasy').hidden = !open;
+  $('#fantasy-toggle').classList.toggle('on', open);
+  localStorage.setItem('fantasy', open ? 'on' : 'off');
+  if (open && !$('#fantasy-frame').src) $('#fantasy-frame').src = state.fantasycast_url;
+}
+$('#fantasy-toggle').onclick = toggleFantasy;
+$('#fantasy-reload').onclick = () => { $('#fantasy-frame').src = state.fantasycast_url; };
+let fantasyNeedsReload = false;
+$('#espn-login').onclick = () => post('/api/espn-login', {}).then(() => { fantasyNeedsReload = true; },
+  () => {}).then(() =>
+  toast('Log in to ESPN in the new tab, then close it — Fantasycast will reload'));
 $('#save-settings').onclick = () => post('/api/settings', {
   break_after: +$('#break_after').value, live_after: +$('#live_after').value, site: $('#site').value,
+  fantasycast_url: $('#fantasycast_url').value,
 }).then(() => { document.activeElement.blur(); toast('Settings saved'); });
 
 // ---------- game list ----------
@@ -395,6 +412,7 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'f' || e.key === 'F') document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
   else if (e.key === 'a' || e.key === 'A') post('/api/pin', { id: null });
   else if (e.key === 'b' || e.key === 'B') toggleDrawer();
+  else if (e.key === 'c' || e.key === 'C') toggleFantasy();
   else if (/^[1-9]$/.test(e.key) && state.games[+e.key - 1]) post('/api/pin', { id: state.games[+e.key - 1].id });
 });
 
@@ -411,6 +429,9 @@ async function poll() {
 (async () => {
   await poll();
   $('#league').value = state?.league || 'nfl';
+  if (localStorage.getItem('fantasy') === 'on') toggleFantasy();
+  // After logging in (tab closed), reload the drawer so it picks up the login.
+  window.addEventListener('focus', () => { if (!$('#fantasy').hidden && fantasyNeedsReload) { fantasyNeedsReload = false; $('#fantasy-frame').src = state.fantasycast_url; } });
   loadGames();
   setInterval(poll, 500);
 })();
