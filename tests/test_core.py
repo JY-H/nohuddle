@@ -180,6 +180,10 @@ def test_parse_scorebug_text():
     assert parse(texts("3RD", "6.34")).clock == 394
     assert (parse(texts("DUKE", "3Ro :47", "19")).quarter, parse(texts("3Ro :47")).clock) == (3, 47)  # under a minute
     assert parse(texts("13", ":25")).clock is None  # a lone play clock
+    # ESPN, under a minute, with other text between the quarter and the clock (from a report)
+    assert parse(texts("12 TEXAS TECH", "1sт", "ESFT", ":53", "30", "25 OKLAHOMA ST")).clock == 53
+    drive = parse(texts("ESPN", "SCORING DRIVE", "16", "PLAYS YARDS", "2:20", "TIME", "20", "1ST", ":53"))
+    assert drive.clock == 53  # not the drive's 2:20
     assert parse(texts("2ND & GOAL", "3RD", ":47", "34")).clock == 47
     assert parse(texts("FOX NFL", "35", ":15", "2ND")).clock == 15  # FOX: clock before the quarter
     # ABC: "1st & 10" read as "1Sт 8.10" (Cyrillic t, & as 8) next to the real clock
@@ -490,3 +494,15 @@ def test_saved_position_with_other_period_length_is_ignored():
     same = GameClock()
     same.load(old.to_json())
     assert same.max_elapsed == 2285
+
+
+def test_return_after_a_score_with_graphics_flickering(monkeypatch):
+    """From a report: after a touchdown, graphics kept covering the scorebug, so the overlays were
+    never up 6s without a gap and the game never came back."""
+    monkeypatch.setattr(gameclock, "read_text", lambda frame: texts("TEXAS TECH", "1ST 1:20", "OKLAHOMA ST"))
+    det = BreakDetector(read_clock=True)
+    run(det, broadcast, 0, 150)
+    monkeypatch.setattr(gameclock, "read_text", lambda frame: [])  # clock unreadable from here on
+    assert run(det, scene, 150, 170) == State.BREAK
+    states = [det.observe(broadcast(t) if t % 5 else scene(t), float(t)) for t in range(170, 190)]
+    assert states[-1] == State.LIVE  # overlays up 80% of the time: back on screen

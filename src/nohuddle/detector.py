@@ -167,6 +167,7 @@ class BreakDetector:
         self._clock_disagrees_since: float | None = None
         self._stuck_since: float | None = None
         self._overlay_since: float | None = None
+        self._recent_overlays: deque[tuple[float, bool]] = deque()
         self.relearned = 0  # times the model was thrown away as wrong
         self.history: deque[tuple[float, np.ndarray]] = deque(maxlen=self.s.history_len)
         self.model: OverlayModel | None = None
@@ -304,8 +305,14 @@ class BreakDetector:
             return self._set(self.override[0], t)
         self.override = None
 
-        confirmed = (not self.clock.readable or self.clock.live(t, within=6.0)
-                     or (present and t - self._present_since >= self.s.overlay_only_return))
+        # Graphics after a score (scoring drive, stats) keep covering the scorebug for a moment,
+        # so "mostly up lately" counts, not just "up without a gap".
+        self._recent_overlays.append((t, any_overlay))
+        while self._recent_overlays and t - self._recent_overlays[0][0] > self.s.overlay_only_return + 2:
+            self._recent_overlays.popleft()
+        mostly_up = (len(self._recent_overlays) >= 3 and t - self._recent_overlays[0][0] >= self.s.overlay_only_return
+                     and np.mean([up for _, up in self._recent_overlays]) >= 0.7)
+        confirmed = not self.clock.readable or self.clock.live(t, within=6.0) or (present and mostly_up)
         if self.state == State.BREAK:
             if present and t - self._present_since >= self.s.live_after and confirmed:
                 return self._set(State.LIVE, t)

@@ -35,6 +35,8 @@ NOT_A_QUARTER_AFTER = re.compile(r"[\s.,:;]*(&|AND\b|DOWNS?\b|HALF\b|TEAM\b|8\s*
 # Team-stat panels (halftime, end of quarter) are full of things that look like a scorebug:
 # "3rd DOWNS" reads as a quarter and time of possession ("14:56") as a game clock.
 STAT_PANEL_RE = re.compile(r"TOTAL\s*YAR|TURNOVERS|POSSESSION|TIME OF POS|\bT\.?O\.?P\b|(?:1ST|3RD|4TH|FIRST|THIRD|FOURTH)\s*DOWNS|PENALTIES|RUSHING\s*YARDS|PASSING\s*YARDS|\bSACKS\b|TACKLES")  # "2ND & 10", "2ND DOWN", "1ST HALF"
+# Drive summaries ("SCORING DRIVE · 8 PLAYS · 75 YARDS · 2:20 TIME") show a duration, not the clock.
+DRIVE_SUMMARY_RE = re.compile(r"SCORING\s*DRIVE|DRIVE\s*SUMMARY|THIS\s*DRIVE")
 WORD_RE = re.compile(r"[A-Z][A-Z.'-]{2,}")
 STOPWORDS = {
     "QUARTER", "QTR", "DOWN", "GOAL", "HALF", "HALFTIME", "FINAL", "TIMEOUT", "FLAG", "REVIEW",
@@ -131,6 +133,16 @@ def parse(texts: list[Text]) -> Reading:
         # with the quarter seen moments ago (see GameClock.update).
         if len(clocks) == 1:
             r.clock = clocks[0][1]
+    if clocks and DRIVE_SUMMARY_RE.search(" | ".join(t.s for t in texts)):
+        # Only a clock printed together with the quarter can be trusted next to a drive summary.
+        clocks = [c for c in clocks if quarters and c[0] is quarters[0][0]]
+    if quarters and not clocks:
+        # Under a minute, a lone ":53" anywhere on screen is the game clock if it's the only one
+        # (play clocks are shown without a colon). Otherwise only the one right next to the quarter.
+        lone = [(t, int(m.group(1))) for t in texts if (m := re.fullmatch(r"\s*[:;](\d{2})\.?\s*", t.s))
+                and int(m.group(1)) < 60]
+        if len(lone) == 1:
+            clocks.append(lone[0])
     if quarters and not clocks:
         # "3RD" and ":47" read as separate pieces: take the one read right next to the quarter
         # (FOX shows ":26" before "2ND", ESPN ":47" after "3RD").
