@@ -520,3 +520,13 @@ def test_long_break_mid_second_quarter_is_not_halftime():
     assert c2.in_halftime(400, 0)
     c2.reset_position(410)  # "Not a break"
     assert not c2.in_halftime(410, 0)
+
+
+def test_fantasy_stat_lines():
+    from nohuddle.fantasy import stat_line
+    qb = {0: 43, 1: 26, 2: 17, 3: 228, 4: 1, 20: 1, 23: 1, 24: 1}  # a real week-9 QB line
+    assert stat_line(1, qb) == "26/43, 228 yds, 1 TD, 1 INT · 1 car, 1 yds"
+    assert stat_line(3, {41: 7, 42: 51, 53: 7, 58: 10}) == "7 rec (10 tgt), 51 yds"
+    assert stat_line(5, {83: 2, 84: 3, 85: 1, 86: 3, 87: 3}) == "FG 2/3, XP 3/3"
+    assert stat_line(16, {96: 2, 99: 4, 120: 13}) == "13 PA, 4 sack, 2 FR"
+    assert stat_line(2, {}) == ""  # hasn't played yet

@@ -21,6 +21,40 @@ PRO_TEAMS = {
 }
 
 
+# ESPN stat IDs, each checked against real box scores (e.g. completions + incompletions = attempts,
+# receptions <= targets, FG made + missed = attempted). IDs we couldn't confirm are left out.
+PASS_ATT, PASS_CMP, PASS_YDS, PASS_TD, PASS_INT = 0, 1, 3, 4, 20
+RUSH_ATT, RUSH_YDS, RUSH_TD = 23, 24, 25
+REC, REC_YDS, REC_TD, TARGETS = 53, 42, 43, 58
+FG_MADE, FG_ATT, XP_MADE, XP_ATT = 83, 84, 86, 87
+DEF_INT, DEF_FR, DEF_SACK, DEF_PA = 95, 96, 99, 120
+
+
+def stat_line(position: int | None, stats: dict[int, float]) -> str:
+    """A Fantasycast-style line, e.g. "26/43, 228 yds, 1 TD, 1 INT" or "7 rec (10 tgt), 51 yds"."""
+    g = lambda k: int(round(stats.get(k, 0)))
+    parts = []
+    if position == 16:  # D/ST
+        if DEF_PA in stats:
+            parts.append(f"{g(DEF_PA)} PA")
+        parts += [f"{g(k)} {label}" for k, label in ((DEF_SACK, "sack"), (DEF_INT, "INT"), (DEF_FR, "FR")) if g(k)]
+        return ", ".join(parts)
+    if position == 5:  # K
+        if g(FG_ATT):
+            parts.append(f"FG {g(FG_MADE)}/{g(FG_ATT)}")
+        if g(XP_ATT):
+            parts.append(f"XP {g(XP_MADE)}/{g(XP_ATT)}")
+        return ", ".join(parts)
+    if g(PASS_ATT):
+        parts.append(f"{g(PASS_CMP)}/{g(PASS_ATT)}, {g(PASS_YDS)} yds"
+                     + (f", {g(PASS_TD)} TD" if g(PASS_TD) else "") + (f", {g(PASS_INT)} INT" if g(PASS_INT) else ""))
+    if g(RUSH_ATT):
+        parts.append(f"{g(RUSH_ATT)} car, {g(RUSH_YDS)} yds" + (f", {g(RUSH_TD)} TD" if g(RUSH_TD) else ""))
+    if g(TARGETS) or g(REC):
+        parts.append(f"{g(REC)} rec ({g(TARGETS)} tgt), {g(REC_YDS)} yds" + (f", {g(REC_TD)} TD" if g(REC_TD) else ""))
+    return " · ".join(parts)
+
+
 def current_season(today: date | None = None) -> int:
     today = today or date.today()
     return today.year if today.month >= 8 else today.year - 1
@@ -54,13 +88,13 @@ class Fantasy:
         else:
             mine = "home" if game["home"]["teamId"] == self.team_id else "away"
             result = {"week": period,
-                      "me": self._side(game.get(mine, {}), teams),
-                      "opp": self._side(game.get("away" if mine == "home" else "home", {}), teams)}
+                      "me": self._side(game.get(mine, {}), teams, scoring),
+                      "opp": self._side(game.get("away" if mine == "home" else "home", {}), teams, scoring)}
         self._cache = (time.time(), result)
         return result
 
     @staticmethod
-    def _side(side: dict, teams: dict) -> dict | None:
+    def _side(side: dict, teams: dict, scoring: int) -> dict | None:
         if not side:
             return None  # a bye
         team = teams.get(side.get("teamId"), {})
@@ -69,10 +103,13 @@ class Fantasy:
             pe, slot = e.get("playerPoolEntry", {}), e.get("lineupSlotId")
             p = pe.get("player", {})
             proj = next((s.get("appliedTotal") for s in p.get("stats", []) if s.get("statSourceId") == 1), None)
+            actual = next((s.get("stats") or {} for s in p.get("stats", [])
+                           if s.get("statSourceId") == 0 and s.get("scoringPeriodId") == scoring), {})
             players.append({
                 "slot": SLOTS.get(slot, "?"), "starter": slot not in BENCH, "name": p.get("fullName", "?"),
                 "team": PRO_TEAMS.get(p.get("proTeamId"), ""), "points": round(pe.get("appliedStatTotal") or 0, 1),
                 "projected": round(proj, 1) if proj is not None else None,
+                "line": stat_line(p.get("defaultPositionId"), {int(k): v for k, v in actual.items()}),
                 "_order": SLOT_ORDER.index(slot) if slot in SLOT_ORDER else 99,
             })
         players.sort(key=lambda x: x.pop("_order"))

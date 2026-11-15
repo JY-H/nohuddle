@@ -294,7 +294,7 @@ const pts = (x) => (x == null ? '–' : x.toFixed(1));
 function fantasyTeam(side) {
   const rows = (list, bench) => list.map((p) => `
     <div class="fx-row${bench ? ' bench' : ''}"><span class="slot">${esc(p.slot)}</span>
-      <span class="who">${esc(p.name)}<small>${esc(p.team)}</small></span>
+      <span class="who">${esc(p.name)}<small>${esc(p.team)}</small>${p.line ? `<span class="line">${esc(p.line)}</span>` : ''}</span>
       <span class="p">${pts(p.points)}<small>${pts(p.projected)}</small></span></div>`).join('');
   return `<div class="fx-side"><h4>${esc(side.name)}</h4>${rows(side.players.filter((p) => p.starter))}
     <h4>Bench</h4>${rows(side.players.filter((p) => !p.starter), true)}</div>`;

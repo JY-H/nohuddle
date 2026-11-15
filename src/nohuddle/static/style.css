@@ -123,3 +123,4 @@ body.resizing #stage iframe { transition: none; }
 .fx-row .p { text-align: right; font-variant-numeric: tabular-nums; }
 .fx-row .p small { color: var(--muted); margin-left: 4px; }
 .fx-row.bench { opacity: .55; }
+.fx-row .who .line { display: block; color: var(--muted); font-size: 11px; margin-top: 1px; }
