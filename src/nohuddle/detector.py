@@ -51,10 +51,11 @@ class DetectorSettings:
     region_match: float = 0.35  # correlation with the learned edge pattern needed to count as present
     min_region_px: int = 20  # persistent edge pixels needed for a region
     max_region_area: float = 0.15  # bounding box larger than this share of the frame = scenery
-    # Seconds with no overlay (neither scorebug nor logo) before declaring a break. Measured on real
-    # broadcasts: 4s gives the same false switches as 8s (replays/transitions with no graphics),
-    # but leaves the screen 4s sooner; 3s starts switching away during replays.
-    break_after: float = 4.0
+    # Seconds with no overlay (neither scorebug nor logo) before declaring a break. With field
+    # footage and the clock also counting as the game, on ~12 min of ad-free NFL broadcast 3s
+    # switched away no more than 4s did (2s added a false switch on a close-up), and leaves ads
+    # a second sooner.
+    break_after: float = 3.0
     live_after: float = 2.0  # seconds with an overlay back before declaring live
     # The network logo stays up through halftime shows; the scorebug doesn't. Replays and stat
     # graphics hide the scorebug for well under this long.
@@ -317,7 +318,10 @@ class BreakDetector:
                 return self._set(State.BREAK, t)
             return self._set(State.LEARNING, t)
 
-        present = (any_overlay or clock_live or any(extra_votes)) and not intermission and not halftime and not stale_hides
+        # The clock only counts when it was read off this very frame: a reading from a couple of
+        # seconds ago, just before the scorebug went, would hold off the break that much longer.
+        clock_now = self._last_read == t and clock_live
+        present = (any_overlay or clock_now or any(extra_votes)) and not intermission and not halftime and not stale_hides
         if present:
             self._absent_since = None
             self._present_since = self._present_since if self._present_since is not None else t
