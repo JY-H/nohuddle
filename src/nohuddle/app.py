@@ -40,6 +40,20 @@ def _data_dir() -> Path:
 
 
 CONFIG_DIR = _data_dir()
+
+
+def _local_env() -> dict[str, str]:
+    """KEY=value pairs from .env in the checkout, if any. Values are only ever handed to the app's
+    own browser - never logged, saved to settings or written into reports."""
+    path = Path(__file__).resolve().parents[2] / ".env"
+    out = {}
+    if path.exists():
+        for line in path.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, value = line.split("=", 1)
+                out[key.strip()] = value.strip().strip('"').strip("'")
+    return out
 STATIC_DIR = Path(__file__).parent / "static"
 
 # Poll intervals (seconds). See README for the reasoning.
@@ -137,7 +151,15 @@ class Controller:
         self.league = league or cfg.get("league", "nfl")
         self.auto = cfg.get("auto", True)
         self.mode = cfg.get("mode", "single")  # "single" or "multi"
-        self.fantasycast_url = cfg.get("fantasycast_url", DEFAULT_FANTASYCAST)
+        env = _local_env()
+        self._espn_cookies = {k: env[k] for k in ("espn_s2", "SWID") if env.get(k)}
+        league, team = env.get("ESPN_LEAGUE_ID"), env.get("ESPN_TEAM_ID")
+        default_fc = DEFAULT_FANTASYCAST
+        if league:
+            default_fc += f"?leagueId={league}" + (f"&teamId={team}" if team else "")
+        self._default_fantasycast = default_fc
+        saved = cfg.get("fantasycast_url")  # only ever a link you entered yourself
+        self.fantasycast_url = saved if saved and saved != DEFAULT_FANTASYCAST else default_fc
         self._allowed_pages: set = set()  # pages we opened on purpose (ESPN login), exempt from popup blocking
         self._expecting_page = False
         s = cfg.get("settings", {})
@@ -165,7 +187,8 @@ class Controller:
     def save(self) -> None:
         cfg = {
             "site": self.site.base_url, "league": self.league, "auto": self.auto, "mode": self.mode,
-            "fantasycast_url": self.fantasycast_url,
+            # Not the link built from .env (that stays out of settings files).
+            "fantasycast_url": None if self.fantasycast_url == self._default_fantasycast else self.fantasycast_url,
             "settings": {"break_after": self.settings.break_after, "live_after": self.settings.live_after},
             "watchlist": [{**self.watched[g].game.to_json(), "embed_index": self.watched[g].embed_index} for g in self.priority],
         }
@@ -305,6 +328,10 @@ class Controller:
     async def _share_espn_login(self) -> None:
         """ESPN's login cookies default to first-party only, so the Fantasycast drawer (an embedded
         frame) would look logged out. In the app's own browser, let them be sent there too."""
+        if self._espn_cookies:  # a session from .env: log the drawer in directly
+            await self.ctx.add_cookies([{"name": k, "value": v, "domain": ".espn.com", "path": "/",
+                                         "secure": True, "sameSite": "None"} for k, v in self._espn_cookies.items()])
+            log.info("Fantasycast: using the ESPN session from .env")
         cookies = [c for c in await self.ctx.cookies() if re.search(r"(espn|go)\.com$", c["domain"])]
         fixed = [{**c, "sameSite": "None", "secure": True} for c in cookies if c.get("sameSite") != "None"]
         if fixed:
@@ -626,7 +653,7 @@ class Controller:
             self.site.base_url = body["site"].rstrip("/")
         if "fantasycast_url" in body:
             url = body["fantasycast_url"].strip()
-            self.fantasycast_url = url if ESPN_RE.match(url) else DEFAULT_FANTASYCAST
+            self.fantasycast_url = url if ESPN_RE.match(url) else self._default_fantasycast
         self.save()
         return web.json_response({"ok": True})
 
@@ -695,7 +722,7 @@ class Controller:
         folder = CONFIG_DIR / "reports" / f"{datetime.now():%Y%m%d-%H%M%S}-{slug}"
         (folder / "frames").mkdir(parents=True)
         report = {"note": note, "saved_at": time.time(), "game": self._debug_info(w),
-                  "app": self._state_json()}
+                  "app": {k: v for k, v in self._state_json().items() if k != "fantasycast_url"}}
         (folder / "report.json").write_text(json.dumps(report, indent=2, default=str))
         if png := self._debug_png(w):
             (folder / "detector.png").write_bytes(png)
