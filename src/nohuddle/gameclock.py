@@ -271,12 +271,15 @@ class GameClock:
 
     # -- state for persistence --
     def to_json(self) -> dict:
-        return {"max_elapsed": self.max_elapsed, "max_at": self.max_at, "halftime_since": self.halftime_since,
+        return {"period_seconds": self.s.period_seconds,
+                "max_elapsed": self.max_elapsed, "max_at": self.max_at, "halftime_since": self.halftime_since,
                 "halftime_by_clock": self.halftime_by_clock, "halftime_done": self.halftime_done,
                 "readable": self.readable,
                 "team_counts": self.team_counts, "team_readings": self.team_readings}
 
     def load(self, d: dict) -> None:
+        if d.get("period_seconds", 15 * 60) != self.s.period_seconds:
+            return  # saved with a different period length: its game-time numbers don't apply
         for k, v in d.items():
             if hasattr(self, k):
                 setattr(self, k, v)

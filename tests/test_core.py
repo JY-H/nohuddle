@@ -455,3 +455,15 @@ def test_nba_clock_uses_12_minute_quarters():
     assert c.in_halftime(42, 0)
     feed(c, 3, 720, 900, 10)  # 3rd quarter tips off at 12:00
     assert not c.in_halftime(910, 0) and c.display.startswith("Q3 11:")
+
+
+def test_saved_position_with_other_period_length_is_ignored():
+    from nohuddle.gameclock import ClockSettings
+    old = GameClock()  # saved before NBA quarters were 12 minutes
+    old.max_elapsed = 2285
+    nba = GameClock(ClockSettings(period_seconds=720))
+    nba.load(old.to_json())
+    assert nba.max_elapsed is None
+    same = GameClock()
+    same.load(old.to_json())
+    assert same.max_elapsed == 2285
