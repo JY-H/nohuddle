@@ -122,6 +122,7 @@ function renderStage() {
 
   const empty = state.games.length > 0 && state.visible.length === 0;
   $('#empty').hidden = !empty;
+  Runner.setActive(empty);
   if (empty) {
     const solo = state.games.length === 1 ? state.games[0] : null;
     const why = solo && { halftime: 'Halftime', highlight: 'Showing highlights', 'other game': 'Showing another game' }[solo.detail];
@@ -370,6 +371,8 @@ $('#save-settings').onclick = () => post('/api/settings', {
 }).then(() => { document.activeElement.blur(); toast('Settings saved'); });
 
 // ---------- game list ----------
+
+Runner.mount($('#runner'));
 
 let gameList = [];
 let lastWatchedKey = null;

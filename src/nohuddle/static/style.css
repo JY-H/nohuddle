@@ -26,6 +26,7 @@ body.single .tile-label:hover span { opacity: 1; }
 #empty h1 { color: var(--text); font-weight: 600; margin: 0 0 4px; }
 #empty ul { list-style: none; padding: 0; margin-top: 16px; }
 #empty li { padding: 2px 0; }
+#runner { margin-top: 24px; width: min(720px, 90%); aspect-ratio: 720 / 200; border-radius: 8px; background: #0f1318; cursor: pointer; }
 #toast { position: absolute; z-index: 5; left: 50%; bottom: 24px; transform: translateX(-50%); background: rgba(20,23,28,.92); border: 1px solid var(--line); padding: 8px 14px; border-radius: 8px; }
 #panel-toggle { position: absolute; z-index: 6; right: 8px; top: 8px; opacity: 0; transition: opacity .2s; }
 #stage:hover #panel-toggle { opacity: .8; }
