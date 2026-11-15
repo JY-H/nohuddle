@@ -564,6 +564,18 @@ def test_return_after_a_score_with_graphics_flickering(monkeypatch):
     assert states[-1] == State.LIVE  # overlays up 80% of the time: back on screen
 
 
+
+def test_one_small_overlay_lookalike_in_an_ad_doesnt_end_the_break(monkeypatch):
+    """From a report: a car ad's fine print matched the team-logo part of the scorebug, frame after
+    frame, and brought the game back mid-ad."""
+    monkeypatch.setattr(gameclock, "read_text", lambda frame: texts("LIONS", "3RD 5:00", "PATRIOTS"))
+    det = BreakDetector(read_clock=True)
+    run(det, broadcast, 0, 150)
+    monkeypatch.setattr(gameclock, "read_text", lambda frame: [])
+    assert run(det, scene, 150, 170) == State.BREAK
+    assert run(det, logo_only, 170, 200) == State.BREAK  # one overlay, no clock: not enough
+    assert run(det, broadcast, 200, 210) == State.LIVE  # the whole scorebug is
+
 def test_long_break_mid_second_quarter_is_not_halftime():
     """From a report: a 5+ minute break at Q2 8:25 was taken for halftime."""
     c = GameClock()

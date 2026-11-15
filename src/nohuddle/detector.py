@@ -309,7 +309,11 @@ class BreakDetector:
 
         # Graphics after a score (scoring drive, stats) keep covering the scorebug for a moment,
         # so "mostly up lately" counts, not just "up without a gap".
-        self._recent_overlays.append((t, any_overlay))
+        # Only the scorebug, or two overlays at once, count here: one small region (a team logo) can
+        # match an ad's fine print frame after frame.
+        hits = [sc >= self.s.region_match for sc in self.last_scores]
+        scorebug_up = bool(hits) and (hits[self.model.primary] or sum(hits) >= 2)
+        self._recent_overlays.append((t, scorebug_up))
         while self._recent_overlays and t - self._recent_overlays[0][0] > self.s.overlay_only_return + 2:
             self._recent_overlays.popleft()
         mostly_up = (len(self._recent_overlays) >= 3 and t - self._recent_overlays[0][0] >= self.s.overlay_only_return
