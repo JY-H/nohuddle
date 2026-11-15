@@ -665,15 +665,15 @@ class Controller:
             return web.json_response({"ok": False, "error": "Couldn't load the matchup from ESPN right now."})
 
     async def _api_fantasy_on_screen(self, req: web.Request) -> web.Response:
-        """Started fantasy players (every team in the league) in the game with sound."""
+        """Fantasy players (rostered anywhere in the league, or big-day free agents) in the game with sound."""
         if self.fantasy is None:
             return web.json_response({"ok": False, "error": "Fantasy isn't set up for this checkout."})
         w = self.watched.get(self.active) if self.active else None
-        teams = pro_teams_in(w.game.title) if w else set()
+        teams = pro_teams_in(w.game.title) if w else []
         if not teams:
-            return web.json_response({"ok": True, "game": w.game.title if w else None, "players": []})
+            return web.json_response({"ok": True, "game": w.game.title if w else None, "teams": []})
         try:
-            return web.json_response({"ok": True, "game": w.game.title, **await self.fantasy.started_in(teams)})
+            return web.json_response({"ok": True, "game": w.game.title, **await self.fantasy.in_game(teams)})
         except Exception as e:
             log.warning("Fantasy: couldn't load the league's players: %s", type(e).__name__)
             return web.json_response({"ok": False, "error": "Couldn't load fantasy players from ESPN right now."})

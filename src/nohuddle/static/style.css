@@ -119,6 +119,11 @@ body.resizing #stage iframe { transition: none; }
 .fx-tabs.on-screen select { display: none; }
 .fx-row .go { font-size: 11px; padding: 0 5px; margin-left: 4px; }
 .fx-row.mine .who { color: var(--accent); }
+.fx-pro { margin-bottom: 10px; padding-bottom: 6px; border-bottom: 2px solid var(--line); }
+.fx-pro h4 { font-size: 14px; color: var(--fg, #e8eaed); text-transform: none; letter-spacing: 0; }
+.fx-pro h4 small { color: var(--muted); font-weight: normal; margin-left: 4px; }
+.fx-pro h5 { margin: 8px 0 2px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+.fx-row .fa { color: var(--muted); margin-left: 4px; }
 .fx-score { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: baseline; padding: 6px 0 10px; border-bottom: 1px solid var(--line); }
 .fx-score .team { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fx-score .pts { font-size: 22px; font-weight: 700; text-align: right; }

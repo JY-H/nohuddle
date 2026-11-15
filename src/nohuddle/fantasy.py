@@ -31,9 +31,15 @@ NICKNAMES = {
 }
 
 
-def pro_teams_in(title: str) -> set[str]:
-    """The NFL teams in a game's title, e.g. "Detroit Lions vs New England Patriots" -> {DET, NE}."""
-    return {abbrev for word in title.replace("-", " ").split() if (abbrev := NICKNAMES.get(word))}
+TEAM_NAMES = {abbrev: nickname for nickname, abbrev in NICKNAMES.items()}
+POSITIONS = {1: "QB", 2: "RB", 3: "WR", 4: "TE", 5: "K", 16: "D/ST"}
+FREE_AGENT_POINTS = 10  # free agents are worth showing past this many fantasy points this week
+
+
+def pro_teams_in(title: str) -> list[str]:
+    """The NFL teams in a game's title, in order: "Detroit Lions vs New England Patriots" -> [DET, NE]."""
+    found = [abbrev for word in title.replace("-", " ").split() if (abbrev := NICKNAMES.get(word))]
+    return list(dict.fromkeys(found))
 
 
 # ESPN stat IDs, each checked against real box scores (e.g. completions + incompletions = attempts,
@@ -138,20 +144,48 @@ class Fantasy:
             result["opp"] = self._side(game.get("away" if mine == "home" else "home", {}), lg["teams"], lg["scoring"])
         return result
 
-    async def started_in(self, pro_teams: set[str]) -> dict:
-        """Every fantasy team's starters who play for `pro_teams` (e.g. the game on screen)."""
+    async def in_game(self, pro_teams: list[str]) -> dict:
+        """Who's worth watching in a game, per NFL team: rostered players (started or on a bench,
+        anywhere in the league) and free agents having a big day."""
         lg, games = await self._week(None)
-        players = []
+        rostered = []
         for m in games:
             for key in ("home", "away"):
                 side = self._side(m.get(key, {}), lg["teams"], lg["scoring"])
-                if side is None:
-                    continue
-                players += [{**p, "fantasy_team": side["name"], "fantasy_team_id": side["id"],
-                             "mine": side["id"] == self.team_id}
-                            for p in side["players"] if p["starter"] and p["team"] in pro_teams]
-        players.sort(key=lambda p: (not p["mine"], p["team"], -p["points"]))
-        return {"week": lg["period"], "players": players}
+                if side is not None:
+                    rostered += [{**p, "fantasy_team": side["name"], "fantasy_team_id": side["id"],
+                                  "mine": side["id"] == self.team_id} for p in side["players"]]
+        free = await self._free_agents(tuple(pro_teams), lg["scoring"])
+        teams = []
+        for abbrev in pro_teams:
+            mine = sorted((p for p in rostered if p["team"] == abbrev), key=lambda p: (not p["mine"], -p["points"]))
+            teams.append({"abbrev": abbrev, "name": TEAM_NAMES.get(abbrev, abbrev),
+                          "started": [p for p in mine if p["starter"]],
+                          "bench": [p for p in mine if not p["starter"]],
+                          "free_agents": [p for p in free if p["team"] == abbrev and p["points"] > FREE_AGENT_POINTS]})
+        return {"week": lg["period"], "teams": teams}
+
+    async def _free_agents(self, pro_teams: tuple[str, ...], scoring: int) -> list[dict]:
+        """Unrostered players on `pro_teams`, best this week first."""
+        ids = [i for i, a in PRO_TEAMS.items() if a in pro_teams]
+        flt = {"players": {"filterStatus": {"value": ["FREEAGENT", "WAIVERS"]}, "filterProTeamIds": {"value": ids},
+                           "filterStatsForCurrentSeasonScoringPeriodId": {"value": [scoring]},
+                           "sortAppliedStatTotalForScoringPeriodId": {"sortAsc": False, "sortPriority": 1, "value": scoring},
+                           "limit": 15}}
+
+        async def fetch():
+            d = await self._get(f"?view=kona_player_info&scoringPeriodId={scoring}", flt)
+            out = []
+            for entry in d.get("players", []):
+                p = entry.get("player", {})
+                week = next((x for x in p.get("stats", [])
+                             if x.get("statSourceId") == 0 and x.get("scoringPeriodId") == scoring), {})
+                out.append({"slot": POSITIONS.get(p.get("defaultPositionId"), "?"), "starter": False,
+                            "name": p.get("fullName", "?"), "team": PRO_TEAMS.get(p.get("proTeamId"), ""),
+                            "points": round(week.get("appliedTotal") or 0, 1), "projected": None,
+                            "line": stat_line(p.get("defaultPositionId"), {int(k): v for k, v in (week.get("stats") or {}).items()})})
+            return out
+        return await self._cached(("free", pro_teams), self._cache_seconds, fetch)
 
     @staticmethod
     def _side(side: dict, teams: dict, scoring: int) -> dict | None:

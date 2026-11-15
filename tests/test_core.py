@@ -841,6 +841,6 @@ def test_fantasy_stat_lines():
 
 def test_pro_teams_from_game_titles():
     from nohuddle.fantasy import pro_teams_in
-    assert pro_teams_in("Detroit Lions vs New England Patriots") == {"DET", "NE"}
-    assert pro_teams_in("San Francisco 49ers vs Washington Commanders") == {"SF", "WSH"}
-    assert pro_teams_in("Ohio State vs Northwestern") == set()
+    assert pro_teams_in("Detroit Lions vs New England Patriots") == ["DET", "NE"]
+    assert pro_teams_in("San Francisco 49ers vs Washington Commanders") == ["SF", "WSH"]
+    assert pro_teams_in("Ohio State vs Northwestern") == []

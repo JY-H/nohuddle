@@ -335,11 +335,17 @@ async function loadFantasy() {
 }
 function renderOnScreen(d) {
   if (!d.game) { $('#fantasy-body').innerHTML = '<p class="hint">No game with sound right now.</p>'; return; }
-  const rows = d.players.map((p) => fxRow(p,
-    ` <button class="go" data-team="${p.fantasy_team_id}" title="Show ${esc(p.fantasy_team)}'s matchup">${esc(p.fantasy_team)} →</button>`)).join('');
-  $('#fantasy-body').innerHTML = `<div class="fx-side"><h4>${esc(d.game)}</h4>
-    ${rows || '<p class="hint">Nobody in your league has a starter in this game.</p>'}</div>
-    <p class="hint">Started players in your league. Updates every 30s.</p>`;
+  const owned = (p) => fxRow(p,
+    ` <button class="go" data-team="${p.fantasy_team_id}" title="Show ${esc(p.fantasy_team)}'s matchup">${esc(p.fantasy_team)} →</button>`);
+  const group = (title, list, row) => (list.length ? `<h5>${title}</h5>${list.map(row).join('')}` : '');
+  const teams = d.teams.map((t) => {
+    const body = group('Started', t.started, owned) + group('Bench', t.bench, owned)
+      + group('Free agents (10+ pts)', t.free_agents, (p) => fxRow({ ...p, starter: true }, ' <small class="fa">FA</small>'));
+    return `<div class="fx-side fx-pro"><h4>${esc(t.name)} <small>${esc(t.abbrev)}</small></h4>
+      ${body || '<p class="hint">Nobody rostered, and no free agent past 10 points.</p>'}</div>`;
+  }).join('');
+  $('#fantasy-body').innerHTML = `${teams || '<p class="hint">Not an NFL game.</p>'}
+    <p class="hint">Players rostered in your league (started or bench), and free agents past 10 points. Updates every 30s.</p>`;
 }
 document.querySelector('.fx-tabs').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-tab]');
