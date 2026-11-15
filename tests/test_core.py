@@ -55,6 +55,22 @@ def test_detects_break_and_return():
 
 
 
+
+def test_league_feed_game_break_panel_is_a_break(monkeypatch):
+    """From reports: the NFL's world feed shows a "Game Break" screen instead of ads, with the
+    game's scorebug (frozen at 2ND 6:12) still in its corner - read as live play."""
+    panel = texts("Game Break", "Week 10", "PASSING LEADERS", "2ND 6:12", "MIN 17", "GB 0")
+    assert parse(panel).break_panel and parse(panel).clock is None
+    monkeypatch.setattr(gameclock, "read_text", lambda frame: texts("MIN 17", "2ND 6:12", "GB 0"))
+    det = BreakDetector(read_clock=True)
+    run(det, broadcast, 0, 150)
+    monkeypatch.setattr(gameclock, "read_text", lambda frame: panel)
+    assert run(det, broadcast, 150, 160) == State.BREAK and det.detail == "break screen"
+    monkeypatch.setattr(gameclock, "read_text", lambda frame: texts("MIN 17", "2ND 6:11", "GB 0"))
+    assert run(det, broadcast, 160, 163) == State.LIVE
+    # CBS's "Eye on the Field": an ad beside the game in a box, its scorebug readable
+    assert parse(texts("EYE ONTHE FIELD", "Uber Eats", "2ND 2:14", "CBS SPORTS")).break_panel
+
 def test_going_quiet_before_the_break_is_called():
     det = BreakDetector(read_clock=False)
     run(det, broadcast, 0, 120)

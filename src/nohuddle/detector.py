@@ -281,6 +281,11 @@ class BreakDetector:
         # highlights mean "not live".
         stale = self.clock.verdict(t)
         stale_hides = stale is not None and self.clock.around_halftime()
+        # A break screen with the game in a box beside it ("Game Break", "Eye on the Field"): its
+        # scorebug is still readable, but it's a break.
+        panel = self.clock.break_panel_at is not None and t - self.clock.break_panel_at <= 2 * self.s.read_clock_every + 0.5
+        if panel:
+            stale, stale_hides = "break screen", True
         clock_live = self.clock.live(t, within=self.s.read_clock_every + 0.5)  # just the latest reading
         clearly_game = self.clock.live(t, within=3.0) or (
             self._overlay_since is not None and t - self._overlay_since >= self.s.clearly_game_after)

@@ -62,6 +62,7 @@ class Reading:
     clock: int | None = None  # seconds left in the quarter
     halftime: bool = False
     words: set[str] = field(default_factory=set)
+    break_panel: bool = False  # a break screen with the game shrunk into a box (see BREAK_PANEL_RE)
 
     def elapsed(self, period: int) -> int | None:
         """Game seconds elapsed, for periods of `period` seconds (overtime counts on from the end)."""
@@ -106,6 +107,9 @@ def _drop_down_and_distance(texts: list[Text]) -> list[Text]:
     return out
 
 
+# Breaks that keep the game in a box: the NFL world feed's "Game Break" screen, CBS's "Eye on the
+# Field" split screen (an ad beside the game).
+BREAK_PANEL_RE = re.compile(r"\bGAME\s*BREAK\b|\bEYE\s*ON\s*THE\s*FIELD\b")
 PREVIEW_RE = re.compile(r"COMING\s*UP|UP\s*NEXT|STILL\s*TO\s*COME|AHEAD\s*ON")
 
 
@@ -113,6 +117,9 @@ def parse(texts: list[Text]) -> Reading:
     """Turn recognised text into a reading. Pairs the quarter with the clock next to it."""
     r = Reading()
     texts = [Text(t.s.translate(LOOKALIKES).upper(), t.x, t.y) for t in texts]
+    if any(BREAK_PANEL_RE.search(t.s) for t in texts):
+        # The scorebug in the panel's corner is the game's, but frozen for the break: not live.
+        return Reading(break_panel=True)
     downs = {int(m.group(0)[0]) for t in texts for m in DOWN_DISTANCE_RE.finditer(t.s)}
     texts = _drop_down_and_distance(texts)
     if len({m.group(0)[:5] for m in STAT_PANEL_RE.finditer(" | ".join(t.s for t in texts))}) >= 2:
@@ -190,6 +197,7 @@ NETWORK_PATTERNS = [
     ("Netflix", r"NETFLIX"),
     ("NFL Network", r"NFL\s*NETWORK|\bNFLN\b"),
     ("TNT", r"\bTNT\b"),
+    ("NFL World Feed", r"GAME\s*BREAK"),  # the league's international feed: no network logo
 ]
 
 
@@ -290,6 +298,7 @@ class GameClock:
         self._run_pending: tuple[float, int] | None = None  # a stray reading that may start a new run
         self._quarter: tuple[float, int, int] | None = None  # (wall time, quarter, clock) last read
         self._halftime_hint: float | None = None
+        self.break_panel_at: float | None = None  # last read a "Game Break" screen
         self._verdict: tuple[float, str] | None = None  # (wall time, "live" | "highlight" | "other game")
         self.display = ""  # e.g. "Q2 1:21", the last live reading
         self._confirmed_live_at = -1e9
@@ -345,6 +354,7 @@ class GameClock:
             self._run_n = 0
             if possible < self._half:
                 self.halftime_since, self.halftime_done = None, False
+        self.break_panel_at = t if r.break_panel else None  # cleared by the next read without it
         # The clock decides (2ND 0:00, or a long break at the very end of the half - see
         # note_intermission). A "HALFTIME" graphic (not a "coming up" promo, see parse()) only
         # counts in the last minutes of the half, or when there's no clock to go by.
