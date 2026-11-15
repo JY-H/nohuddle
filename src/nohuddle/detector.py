@@ -81,6 +81,12 @@ class DetectorSettings:
     # A game still learning is hidden (it could be mid-ad) until its scorebug confirms live play.
     # If its scorebug can't be read at all, show it anyway after this long - better than never.
     unverified_grace: float = 45.0
+    # Replays often drop the scorebug *and* logo, but they're still footage of the same game: same
+    # field or court, colours and lighting. Ads aren't. Measured on real broadcasts: ads score ~0
+    # against the game's colour signature, overlay-free game footage ~0.55-0.65.
+    look_match: float = 0.35
+    replay_cap: float = 45.0  # after this long without overlays, stop giving it the benefit of the doubt
+    look_rate: float = 0.03  # how fast the signature follows the broadcast
 
 
 def preprocess(frame_bgr: np.ndarray) -> np.ndarray:
@@ -152,6 +158,9 @@ class BreakDetector:
         self._from_network = False  # current model came from the library, not this game
         self._network_hits: dict[str, tuple[float, int]] = {}
         self._first_seen: float | None = None
+        self._look: np.ndarray | None = None  # colour signature of the live broadcast
+        self._look_sims: deque[float] = deque(maxlen=3)
+        self._overlays_gone_since: float | None = None
         self.clock = GameClock(clock_settings)
         self.read_clock = read_clock
         self._last_read = -1e9
@@ -235,6 +244,7 @@ class BreakDetector:
         halftime = self.clock.in_halftime(t, t - self._primary_since if self._primary_since is not None else 0.0)
         stale = self.clock.verdict(t)
         clock_live = self.clock.live(t, within=self.s.read_clock_every + 0.5)  # just the latest reading
+        looks_like_game = self._looks_like_game(frame_bgr, any_overlay, t)
 
         if learned and self.clock.live(t, within=self.s.read_clock_every * 2) and not any_overlay:
             # The scorebug reads as live play but none of the learned overlays are there: they're
@@ -271,7 +281,7 @@ class BreakDetector:
                 return self._set(State.BREAK, t)
             return self._set(State.LEARNING, t)
 
-        present = (any_overlay or clock_live) and not intermission and not halftime and not stale
+        present = (any_overlay or clock_live or looks_like_game) and not intermission and not halftime and not stale
         if present:
             self._absent_since = None
             self._present_since = self._present_since if self._present_since is not None else t
@@ -293,6 +303,23 @@ class BreakDetector:
         if present and self.state in (State.LEARNING, State.STALLED):
             return self._set(State.LIVE, t)
         return self.state
+
+    def _looks_like_game(self, frame_bgr: np.ndarray, any_overlay: bool, t: float) -> bool:
+        """No overlays, but is this still the game (a replay) rather than an ad?"""
+        hsv = cv2.cvtColor(cv2.resize(frame_bgr, (160, 90), interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2HSV)
+        hist = cv2.calcHist([hsv], [0, 1], None, [18, 8], [0, 180, 0, 256])
+        hist = cv2.normalize(hist, hist).flatten()
+        if any_overlay:
+            self._overlays_gone_since = None
+            if self.state == State.LIVE:
+                self._look = hist if self._look is None else (1 - self.s.look_rate) * self._look + self.s.look_rate * hist
+            self._look_sims.clear()
+            return False
+        self._overlays_gone_since = self._overlays_gone_since or t
+        if self._look is None or t - self._overlays_gone_since > self.s.replay_cap:
+            return False
+        self._look_sims.append(float(cv2.compareHist(self._look, hist, cv2.HISTCMP_CORREL)))
+        return float(np.mean(self._look_sims)) >= self.s.look_match
 
     def _try_networks(self, grey: np.ndarray, t: float) -> bool:
         """Still learning: does this look like a network we already know? Adopt it if so."""

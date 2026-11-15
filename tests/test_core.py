@@ -16,8 +16,17 @@ def scene(t: float) -> np.ndarray:
     return cv2.resize(img, (640, 360), interpolation=cv2.INTER_CUBIC)
 
 
-def broadcast(t: float) -> np.ndarray:
+def field(t: float) -> np.ndarray:
+    """Game footage: changes every frame, but always a green field (unlike ads)."""
     img = scene(t)
+    img[:, :, 1] = np.clip(img[:, :, 1].astype(int) // 2 + 110, 0, 255)
+    img[:, :, 0] //= 3
+    img[:, :, 2] //= 3
+    return img
+
+
+def broadcast(t: float) -> np.ndarray:
+    img = field(t)
     cv2.rectangle(img, (150, 300), (490, 340), (20, 20, 20), -1)  # scorebug
     cv2.putText(img, "DUKE 3  2ND  MIAMI 9", (160, 330), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
     cv2.putText(img, "NET", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)  # network logo
@@ -25,7 +34,7 @@ def broadcast(t: float) -> np.ndarray:
 
 
 def logo_only(t: float) -> np.ndarray:
-    img = scene(t)
+    img = field(t)
     cv2.putText(img, "NET", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
     return img
 
@@ -382,3 +391,31 @@ def test_position_cannot_run_ahead_of_kickoff():
     feed(c, 1, 190, t + 20, 6)
     assert not c.halftime_done
     assert c.live(t + 12) and c.display.startswith("Q1")
+
+
+def test_halftime_stats_panel_is_not_the_second_half():
+    # From a report: "3rd DOWNS" read as the quarter, time of possession as the clock.
+    panel = texts("6 TEXAS", "10", "14", "21LSU", "TEXAS", "LSU", "144", "TOTAL YARDS", "206", "3-9",
+                  "3rd DOWNS", "5-7", "TURNOVERS", "14:56", "15:04")
+    assert parse(panel).clock is None
+    assert parse(texts("3RD DOWNS", "14:56")).quarter is None
+    c = GameClock()
+    feed(c, 2, 20, 0, 24)  # end of the 2nd quarter
+    c.update(reading(2, 0), 30)
+    c.update(reading(2, 0), 32)
+    assert c.in_halftime(32, 0)
+    for k in range(10):  # a frozen "3RD 15:00" during the halftime show
+        c.update(reading(3, 900), 600 + 2 * k)
+    assert c.in_halftime(620, 0)
+    feed(c, 3, 900, 1500, 10)  # kickoff: the clock runs
+    assert not c.in_halftime(1510, 0) and c.live(1508)
+
+
+def test_replay_without_overlays_stays_on_screen():
+    det = BreakDetector(read_clock=False)
+    run(det, broadcast, 0, 150)
+    assert run(det, field, 150, 165) == State.LIVE  # 15s replay: no scorebug or logo, same game
+    assert run(det, broadcast, 165, 170) == State.LIVE
+    assert run(det, scene, 170, 180) == State.BREAK  # an actual ad still goes to break
+    run(det, broadcast, 180, 200)
+    assert run(det, field, 200, 260) == State.BREAK  # but not forever

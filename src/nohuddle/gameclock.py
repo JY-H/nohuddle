@@ -31,7 +31,10 @@ CLOCK_RE = re.compile(r"(?<![\d:.])(\d{1,2})[:.;](\d{2})(?![:.]\d)(?!\s*[AP]\.?M
 SUBMINUTE_AFTER_QUARTER_RE = re.compile(r"[^\d:]{0,3}[:;](\d{2})(?![\d:.])")
 OT_RE = re.compile(r"(?<![A-Z])(\d?OT)(?![A-Z])")
 # "2ND & 10", "2ND DOWN", "1ST HALF" - and "2nd.84", which is "2nd & 4" with the & read as an 8.
-NOT_A_QUARTER_AFTER = re.compile(r"[\s.,:;]*(&|AND\b|DOWN\b|HALF\b|TEAM\b|8\s*\d{1,2}\b(?![:.]))")  # "2ND & 10", "2ND DOWN", "1ST HALF"
+NOT_A_QUARTER_AFTER = re.compile(r"[\s.,:;]*(&|AND\b|DOWNS?\b|HALF\b|TEAM\b|8\s*\d{1,2}\b(?![:.]))")
+# Team-stat panels (halftime, end of quarter) are full of things that look like a scorebug:
+# "3rd DOWNS" reads as a quarter and time of possession ("14:56") as a game clock.
+STAT_PANEL_RE = re.compile(r"TOTAL\s*YAR|TURNOVERS|POSSESSION|TIME OF POS|\bT\.?O\.?P\b|(?:1ST|3RD|4TH|FIRST|THIRD|FOURTH)\s*DOWNS|PENALTIES|RUSHING\s*YARDS|PASSING\s*YARDS")  # "2ND & 10", "2ND DOWN", "1ST HALF"
 WORD_RE = re.compile(r"[A-Z][A-Z.'-]{2,}")
 STOPWORDS = {
     "QUARTER", "QTR", "DOWN", "GOAL", "HALF", "HALFTIME", "FINAL", "TIMEOUT", "FLAG", "REVIEW",
@@ -106,6 +109,9 @@ def parse(texts: list[Text]) -> Reading:
     """Turn recognised text into a reading. Pairs the quarter with the clock next to it."""
     r = Reading()
     texts = _drop_down_and_distance([Text(t.s.translate(LOOKALIKES).upper(), t.x, t.y) for t in texts])
+    if len({m.group(0)[:5] for m in STAT_PANEL_RE.finditer(" | ".join(t.s for t in texts))}) >= 2:
+        r.halftime = any("HALFTIME" in t.s for t in texts)
+        return r  # a stats panel: nothing on it is the game clock
     quarters = [(t, q) for t in texts if (q := _quarter_in(t.s.upper())) is not None]
     clocks = []
     for t in texts:
@@ -368,14 +374,19 @@ class GameClock:
             self.halftime_done = False  # still in the first half: whatever said otherwise was wrong
         if r.quarter == 2 and r.clock == 0:
             self._start_halftime(t, by_clock=True)
-        elif r.quarter is not None and r.quarter >= 3:
-            self.halftime_since = None  # second half underway
+        elif r.quarter is not None and r.quarter >= 3 and (self.halftime_since is None or self._clock_running(e)):
+            # Second half underway - but only believe it once the 3rd-quarter clock actually runs:
+            # a frozen "3RD 15:00" or a graphic can show up during the halftime show.
+            self.halftime_since = None
             self.halftime_done = True
 
     def _resumes(self, e: int, t: float) -> bool:
         if self.max_elapsed is None:
             return False
         return self.max_elapsed - self.s.resume_slack <= e <= self.max_elapsed + min(t - self.max_at, 300) + self.s.resume_slack
+
+    def _clock_running(self, e: int) -> bool:
+        return self._run_start is not None and self._run_n >= 2 and e - self._run_start[1] >= 3
 
     def _continues_run(self, t: float, e: int | None) -> bool:
         if self._run_last is None or e is None:
