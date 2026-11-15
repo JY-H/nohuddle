@@ -237,8 +237,10 @@ class BreakDetector:
             self.network_votes.update(gameclock.network_votes([x.s for x in texts]))
         self._overlay_since = (self._overlay_since or t) if any_overlay else None
         # Logo steadily up (not one stray frame that resembles it) while the scorebug's been gone.
+        # Not while the clock says we're mid-half, though: then it's play with the scorebug missing
+        # (a feed's graphics dropping out), not a halftime show.
         intermission = (any_overlay and t - self._overlay_since >= self.s.intermission_logo_for
-                        and t - self._primary_seen_at >= self.s.intermission_after)
+                        and t - self._primary_seen_at >= self.s.intermission_after and not self.clock.mid_half())
         if intermission or (self.state == State.BREAK and t - self.since >= self.s.long_break_halftime):
             self.clock.note_intermission(t)
         halftime = self.clock.in_halftime(t, t - self._primary_since if self._primary_since is not None else 0.0)
@@ -399,9 +401,14 @@ class BreakDetector:
                 return
         first = self.model is None or not self.model.regions
         frames = [g for _, g in self.history]
-        self.model = OverlayModel.from_frames(frames[-self.s.recent_fit_frames:] if first else frames, self.s)
+        model = OverlayModel.from_frames(frames[-self.s.recent_fit_frames:] if first else frames, self.s)
+        self._last_fit = t
+        if not first and not model.regions:
+            # Too much non-game footage in the history (ads caught while learning, long replays)
+            # washes every overlay out. Nothing learned is worse than what we have: keep it.
+            return
+        self.model = model
         self._from_network = False
         self.model_version += 1
-        self._last_fit = t
         if first:
             self._primary_seen_at = t

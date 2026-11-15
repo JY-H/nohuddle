@@ -453,6 +453,13 @@ class GameClock:
         return (self.max_elapsed is not None and not self.halftime_done
                 and self.max_elapsed >= self._half - 30)
 
+    def mid_half(self) -> bool:
+        """The clock says we're well inside a half: no halftime (or pre/post-game) show now."""
+        if not self.readable or self.max_elapsed is None or self.halftime_since is not None:
+            return False
+        e, half, w = self.max_elapsed, self._half, self.s.half_end_window
+        return e < half - w or (self.halftime_done and half < e < 2 * half - w)
+
     def reset_position(self, t: float) -> None:
         """Forget where we think the game is (the user says what's on screen is live)."""
         self.log.append({"t": round(t, 1), "resync": None, "was": self.max_elapsed, "why": "reset by you"})

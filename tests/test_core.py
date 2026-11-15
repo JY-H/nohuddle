@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 
 from nohuddle import gameclock, scheduler
-from nohuddle.detector import BreakDetector, State
+from nohuddle.detector import BreakDetector, State, preprocess
 from nohuddle.gameclock import GameClock, Reading, Text, parse
 from nohuddle.health import PlaybackHealth
 from nohuddle.streams import deobfuscate
@@ -73,6 +73,17 @@ def test_long_break_does_not_erase_overlays():
     run(det, broadcast, 0, 180)
     assert run(det, scene, 180, 420) == State.BREAK  # 4 minutes of ads
     assert run(det, broadcast, 420, 424) == State.LIVE
+
+
+def test_refit_never_throws_away_learned_overlays():
+    """A history full of non-game footage refits to nothing; the overlays we had must stay."""
+    det = BreakDetector(read_clock=False)
+    run(det, broadcast, 0, 120)
+    det.history.clear()
+    det.history.extend((float(t), preprocess(scene(t))) for t in range(-150, 0, 4))
+    run(det, broadcast, 120, 160)  # scorebug up, so refits happen
+    assert det.model.regions
+    assert run(det, logo_only, 160, 200) == State.LIVE
 
 
 def test_halftime_show_with_only_the_logo_is_a_break():
@@ -470,6 +481,35 @@ def test_football_highlight_on_the_field_stays_on_screen():
     run(det, broadcast, 190, 210)
     assert run(det, field, 210, 270) == State.BREAK  # and the allowance runs out
 
+
+
+def yard_lined_field(t: float) -> np.ndarray:
+    img = field(t)
+    for x in range(40, 640, 90):
+        cv2.line(img, (x + 30, 0), (x - 30, 359), (245, 245, 245), 3)
+    return img
+
+
+def test_feed_without_graphics_stays_on_screen_while_the_field_is_shown():
+    """From a report: an international feed dropped its scorebug and logo for minutes of play.
+    Past the field-green allowance, yard lines still mark it as football."""
+    from nohuddle.football import yard_lines
+    from nohuddle.sports import NFL
+    assert yard_lines(yard_lined_field(0)) >= 3 and yard_lines(field(0)) == 0 and yard_lines(scene(0)) == 0
+    det = BreakDetector(read_clock=False, extras=NFL.make_extras())
+    run(det, broadcast, 0, 150)
+    assert run(det, yard_lined_field, 150, 300) == State.LIVE
+    assert run(det, scene, 300, 310) == State.BREAK
+
+
+def test_logo_only_mid_quarter_is_not_halftime(monkeypatch):
+    """From a report: the scorebug vanished for minutes at Q2 5:47 with the logo still up, and
+    it was taken for a halftime show."""
+    monkeypatch.setattr(gameclock, "read_text", lambda frame: texts("LIONS", "2ND 5:47", "PATRIOTS"))
+    det = BreakDetector(read_clock=True)
+    run(det, broadcast, 0, 150)
+    monkeypatch.setattr(gameclock, "read_text", lambda frame: [])
+    assert run(det, logo_only, 150, 450) == State.LIVE
 
 def test_nba_clock_uses_12_minute_quarters():
     from nohuddle.gameclock import ClockSettings
