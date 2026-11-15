@@ -368,8 +368,10 @@ class Controller:
     def _poll_interval(self, gid: str) -> float:
         if gid == self.active:
             return POLL_ACTIVE
-        if self.active is None and self.watched[gid].detector.state == State.BREAK:
-            return POLL_AWAITED  # nothing on screen: every game on a break is the one we're waiting for
+        if (self.active is None or self.mode == "multi") and self.watched[gid].detector.state == State.BREAK:
+            # Nothing on screen, or multiview (every live game is shown): every game on a break
+            # is one we're waiting for.
+            return POLL_AWAITED
         if self.active in self.priority and gid in self.priority and \
                 self.priority.index(gid) < self.priority.index(self.active) and \
                 self.watched[gid].detector.state == State.BREAK:
@@ -401,7 +403,7 @@ class Controller:
         res = None
         if frame is not None and not frame.is_detached():
             try:
-                res = await frame.evaluate(GRAB_JS, {"width": 640, "muted": gid != self.active})
+                res = await frame.evaluate(GRAB_JS, {"width": 640, "muted": self._muted(gid)})
             except Exception:
                 self._frames_dirty = True
         res = res or {}
@@ -478,11 +480,15 @@ class Controller:
                 self._event(f"→ {self.watched[new].game.title} ({why})")
             asyncio.ensure_future(self._apply_audio())
 
+    def _muted(self, gid: str) -> bool:
+        """Only the active game has sound - and not while it looks to be going to a break."""
+        return gid != self.active or self._hushed
+
     async def _apply_audio(self) -> None:
         frames = await self._game_frames()
         for gid, f in frames.items():
             try:
-                await f.evaluate(SET_MUTED_JS, gid != self.active or self._hushed)
+                await f.evaluate(SET_MUTED_JS, self._muted(gid))
             except Exception:
                 pass
 

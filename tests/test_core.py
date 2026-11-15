@@ -339,6 +339,20 @@ def test_halftime_ends_when_the_third_quarter_clock_has_started():
     c.update(reading(3, 896), t + 1004)  # kickoff done, clock stopped
     assert not c.in_halftime(t + 1004, 4)
 
+
+def test_halftime_ends_on_15_00_with_a_down_and_distance():
+    """From a report: after a touchback the clock stayed at 3RD 15:00 with "1ST & 10" up, and the
+    game stayed hidden as halftime until the first snap."""
+    c = GameClock()
+    t = feed(c, 2, 10, 0, 12)
+    c.update(reading(2, 0), t)
+    c.update(reading(2, 0), t + 2)
+    kickoff = Reading(3, 900, words={"DUKE", "MIAMI"}, down=True)
+    c.update(kickoff, t + 900)
+    c.update(kickoff, t + 902)
+    assert not c.in_halftime(t + 902, 4)
+    assert parse(texts("17", "15:00", "3RD", "1ST & 10")).down
+
 def test_clock_other_games_highlights():
     c = GameClock()
     for i in range(20):
@@ -402,6 +416,17 @@ def test_other_games_clock_during_halftime_cannot_move_us_forward():
     feed(c, 3, 900, 1500, 20)  # our 3rd quarter kicks off
     assert c.live(1518) and c.display.startswith("Q3")
 
+
+
+def test_wrong_position_corrects_itself_across_stat_graphics():
+    """From a report: the position was stuck at Q3 5:04 while the clock read 3RD 14:53 -> 14:14,
+    in stretches of 10s and 8s between stat graphics covering the scorebug - never 30s unbroken."""
+    c = GameClock()
+    c.max_elapsed, c.max_at, c.readable, c.halftime_done = 2396, 0.0, True, True
+    t = 1000.0
+    for _ in range(3):  # 10s of clock, then 20s of a stats graphic over the scorebug
+        t = feed(c, 3, 893 - int(t - 1000), t, 10, step=2.0) + 20
+    assert c.max_elapsed < 2 * 900 + 120  # back to early in the 3rd quarter
 
 def test_wrong_position_corrects_itself():
     c = GameClock()

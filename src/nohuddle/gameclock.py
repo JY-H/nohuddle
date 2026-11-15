@@ -64,6 +64,7 @@ class Reading:
     words: set[str] = field(default_factory=set)
     break_panel: bool = False  # a break screen with the game shrunk into a box (see BREAK_PANEL_RE)
     next_gen_stats: bool = False  # a "Next Gen Stats" graphic: the NFL's own feed shows them in breaks
+    down: bool = False  # a down and distance ("1ST & 10") on the scorebug: the offense is on the field
 
     def elapsed(self, period: int) -> int | None:
         """Game seconds elapsed, for periods of `period` seconds (overtime counts on from the end)."""
@@ -125,6 +126,7 @@ def parse(texts: list[Text]) -> Reading:
     if any(NEXT_GEN_RE.search(t.s) for t in texts):
         return Reading(next_gen_stats=True)  # a stats graphic: nothing on it is the game clock
     downs = {int(m.group(0)[0]) for t in texts for m in DOWN_DISTANCE_RE.finditer(t.s)}
+    r.down = bool(downs)
     texts = _drop_down_and_distance(texts)
     if len({m.group(0)[:5] for m in STAT_PANEL_RE.finditer(" | ".join(t.s for t in texts))}) >= 2:
         r.halftime = any("HALFTIME" in t.s for t in texts) and not PREVIEW_RE.search(" | ".join(t.s for t in texts))
@@ -262,7 +264,9 @@ class ClockSettings:
     rewind_tolerance: float = 150.0  # game seconds behind the furthest point before it's "old"
     ahead_slack: float = 60.0  # game clock can't outrun real time; allow this much for misc. error
     confirm_window: float = 30.0  # wall seconds within which two halftime hints must come
-    run_gap: float = 15.0  # readings further apart than this don't continue a run
+    # Readings further apart than this don't continue a run. Stat graphics often cover the
+    # scorebug for 20-30s; a clock that picks up in step with real time after one is the same run.
+    run_gap: float = 45.0
     run_slack: float = 10.0  # game seconds a run's clock may run ahead of real time (OCR jitter)
     resync_after: float = 30.0  # a steadily running clock for this long is live play, full stop
     quarter_memory: float = 180.0  # how long a read quarter is assumed for quarter-less readings
@@ -446,10 +450,11 @@ class GameClock:
         if r.quarter == self.s.periods_per_half and r.clock == 0:
             self._start_halftime(t, by_clock=True)
         elif r.quarter is not None and r.quarter > self.s.periods_per_half and (
-                self.halftime_since is None or (self._run_n >= 2 and e > self._half)):
+                self.halftime_since is None or (self._run_n >= 2 and (e > self._half or r.down))):
             # Second half underway - but only believe it once the 3rd-quarter clock has started (two
             # agreeing readings below 15:00): a frozen "3RD 15:00" can show up during the halftime
-            # show. It needn't be seen running: after the kickoff it often stops at 14:5x.
+            # show. It needn't be seen running: after the kickoff it often stops at 14:5x. After a
+            # touchback it's still 15:00 - but with a down and distance, the offense is out.
             self.halftime_since = None
             self.halftime_done = True
 
