@@ -34,7 +34,7 @@ OT_RE = re.compile(r"(?<![A-Z])(\d?OT)(?![A-Z])")
 NOT_A_QUARTER_AFTER = re.compile(r"[\s.,:;]*(&|AND\b|DOWNS?\b|HALF\b|TEAM\b|8\s*\d{1,2}\b(?![:.]))")
 # Team-stat panels (halftime, end of quarter) are full of things that look like a scorebug:
 # "3rd DOWNS" reads as a quarter and time of possession ("14:56") as a game clock.
-STAT_PANEL_RE = re.compile(r"TOTAL\s*YAR|TURNOVERS|POSSESSION|TIME OF POS|\bT\.?O\.?P\b|(?:1ST|3RD|4TH|FIRST|THIRD|FOURTH)\s*DOWNS|PENALTIES|RUSHING\s*YARDS|PASSING\s*YARDS")  # "2ND & 10", "2ND DOWN", "1ST HALF"
+STAT_PANEL_RE = re.compile(r"TOTAL\s*YAR|TURNOVERS|POSSESSION|TIME OF POS|\bT\.?O\.?P\b|(?:1ST|3RD|4TH|FIRST|THIRD|FOURTH)\s*DOWNS|PENALTIES|RUSHING\s*YARDS|PASSING\s*YARDS|\bSACKS\b|TACKLES")  # "2ND & 10", "2ND DOWN", "1ST HALF"
 WORD_RE = re.compile(r"[A-Z][A-Z.'-]{2,}")
 STOPWORDS = {
     "QUARTER", "QTR", "DOWN", "GOAL", "HALF", "HALFTIME", "FINAL", "TIMEOUT", "FLAG", "REVIEW",
@@ -228,9 +228,10 @@ class ClockSettings:
     confirm_window: float = 30.0  # wall seconds within which two halftime hints must come
     run_gap: float = 15.0  # readings further apart than this don't continue a run
     run_slack: float = 10.0  # game seconds a run's clock may run ahead of real time (OCR jitter)
-    resync_after: float = 60.0  # a steadily running clock for this long is live play, full stop
+    resync_after: float = 30.0  # a steadily running clock for this long is live play, full stop
     quarter_memory: float = 180.0  # how long a read quarter is assumed for quarter-less readings
     resume_slack: float = 30.0  # game seconds a lone reading may differ from where we were and still count
+    big_jump: float = 60.0  # moving the position further ahead than this needs a running clock
     verdict_ttl: float = 8.0  # how long a single reading's verdict stands
     min_halftime: float = 12 * 60  # fallback when the clock can't be read: NFL ~13 min
     halftime_resume_scorebug: float = 30.0  # ...and the scorebug back this long
@@ -262,6 +263,7 @@ class GameClock:
         self._run_start: tuple[float, int] | None = None
         self._run_last: tuple[float, int] | None = None
         self._run_n = 0
+        self._run_pending: tuple[float, int] | None = None  # a stray reading that may start a new run
         self._quarter: tuple[float, int, int] | None = None  # (wall time, quarter, clock) last read
         self._halftime_hint: float | None = None
         self._verdict: tuple[float, str] | None = None  # (wall time, "live" | "highlight" | "other game")
@@ -359,13 +361,14 @@ class GameClock:
             # game's scorebug (look-ins, NFL highlights) or a misread. Never trust it outright...
             teams = self.teams
             other = teams and not any(similar(w, team) for w in r.words for team in teams)
-            self._verdict = (t, "other game") if other else None
+            self._verdict = (t, "other game") if other and run_for > 0 else None
             if other or run_for < self.s.resync_after:
                 return
             self._raise_max(e, t, resync=True)  # ...unless it keeps running steadily: we were wrong
         elif e < self.max_elapsed - self.s.rewind_tolerance:
             if run_for < self.s.resync_after:
-                self._verdict = (t, "highlight")
+                # Two consistent readings behind us: a highlight. A single one: probably a misread.
+                self._verdict = (t, "highlight") if run_for > 0 else None
                 return
             self._raise_max(e, t, resync=True)  # a minute of steadily running clock isn't a highlight
 
@@ -377,8 +380,8 @@ class GameClock:
         if self._run_n < 2 and not self._resumes(e, t):
             return
         self._confirmed_live_at = t
-        if e > self.max_elapsed:
-            self._raise_max(e, t)
+        if e > self.max_elapsed and (e - self.max_elapsed <= self.s.big_jump or self._clock_running(e)):
+            self._raise_max(e, t)  # big jumps (e.g. a misread right after a break) need a running clock
         for w in r.words:
             self.team_counts[w] = self.team_counts.get(w, 0) + 1
         self.team_readings += 1
@@ -401,21 +404,49 @@ class GameClock:
     def _clock_running(self, e: int) -> bool:
         return self._run_start is not None and self._run_n >= 2 and e - self._run_start[1] >= 3
 
-    def _continues_run(self, t: float, e: int | None) -> bool:
-        if self._run_last is None or e is None:
+    def _continues(self, last: tuple[float, int] | None, t: float, e: int | None) -> bool:
+        if last is None or e is None:
             return False
-        lt, le = self._run_last
+        lt, le = last
         return t - lt <= self.s.run_gap and 0 <= e - le <= (t - lt) + self.s.run_slack
 
+    def _continues_run(self, t: float, e: int | None) -> bool:
+        return self._continues(self._run_last, t, e)
+
     def _extend_run(self, t: float, e: int) -> float:
-        """Track runs of live-looking readings; returns how long the current run has lasted."""
+        """Track runs of live-looking readings; returns how long the current run has lasted (0 for a
+        reading that doesn't belong to it). One stray reading (a misread) doesn't end a run; if the
+        next reading agrees with the stray one instead, that's a new run of two."""
         if self._continues_run(t, e):
             self._run_last = (t, e)
             self._run_n += 1
+            self._run_pending = None
             return t - self._run_start[0]
+        if self._continues(self._run_pending, t, e):
+            self._run_start, self._run_last, self._run_n = self._run_pending, (t, e), 2
+            self._run_pending = None
+            return t - self._run_start[0]
+        if self._run_last is not None and self._run_pending is None and t - self._run_last[0] <= self.s.run_gap:
+            self._run_pending = (t, e)
+            return 0.0
         self._run_start = self._run_last = (t, e)
         self._run_n = 1
+        self._run_pending = None
         return 0.0
+
+    def around_halftime(self) -> bool:
+        """End of the first half reached, second half not started: old-scorebug highlights here are
+        the halftime show, not live play."""
+        return (self.max_elapsed is not None and not self.halftime_done
+                and self.max_elapsed >= self._half - 30)
+
+    def reset_position(self, t: float) -> None:
+        """Forget where we think the game is (the user says what's on screen is live)."""
+        self.log.append({"t": round(t, 1), "resync": None, "was": self.max_elapsed, "why": "reset by you"})
+        self.max_elapsed, self._quarter, self._verdict = None, None, None
+        self._run_start = self._run_last = None
+        self._run_n = 0
+        self._run_pending = None
 
     def _raise_max(self, e: int, t: float, resync: bool = False) -> None:
         if resync:

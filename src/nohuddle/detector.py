@@ -241,7 +241,11 @@ class BreakDetector:
         if intermission or (self.state == State.BREAK and t - self.since >= self.s.long_break_halftime):
             self.clock.note_intermission(t)
         halftime = self.clock.in_halftime(t, t - self._primary_since if self._primary_since is not None else 0.0)
+        # A highlight or another game's scorebug during play is part of the broadcast: keep showing
+        # the game (those readings just don't count as the clock). Only around halftime do old
+        # highlights mean "not live".
         stale = self.clock.verdict(t)
+        stale_hides = stale is not None and self.clock.around_halftime()
         clock_live = self.clock.live(t, within=self.s.read_clock_every + 0.5)  # just the latest reading
         clearly_game = self.clock.live(t, within=3.0) or (
             self._overlay_since is not None and t - self._overlay_since >= self.s.clearly_game_after)
@@ -268,7 +272,7 @@ class BreakDetector:
         if not learned:
             if self.override and self._override_holds(False, t):
                 return self._set(self.override[0], t)
-            if halftime or stale:
+            if halftime or stale_hides:
                 self.detail = "halftime" if halftime else stale
                 return self._set(State.BREAK, t)
             if clock_live:
@@ -283,14 +287,14 @@ class BreakDetector:
                 return self._set(State.BREAK, t)
             return self._set(State.LEARNING, t)
 
-        present = (any_overlay or clock_live or any(extra_votes)) and not intermission and not halftime and not stale
+        present = (any_overlay or clock_live or any(extra_votes)) and not intermission and not halftime and not stale_hides
         if present:
             self._absent_since = None
             self._present_since = self._present_since if self._present_since is not None else t
         else:
             self._present_since = None
             self._absent_since = self._absent_since if self._absent_since is not None else t
-            self.detail = "halftime" if halftime else stale or ("no scorebug" if intermission else "ads")
+            self.detail = "halftime" if halftime else (stale if stale_hides else None) or ("no scorebug" if intermission else "ads")
 
         if self.override and self._override_holds(present, t):
             return self._set(self.override[0], t)
@@ -350,6 +354,7 @@ class BreakDetector:
         if state == State.LIVE:
             self.override = None
             self._relearn(t)
+            self.clock.reset_position(t)  # whatever made it look like a break/highlight was wrong
             return
         self.override = (state, t + hold)
         self._override_saw_absent = False

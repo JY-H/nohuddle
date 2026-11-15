@@ -204,8 +204,10 @@ def test_clock_flags_highlights_from_earlier():
     assert c.verdict(20) is None
     c.update(reading(2, 260), 22)  # replay of the play that just happened: fine
     assert c.verdict(22) is None
-    c.update(reading(1, 600), 24)  # first-quarter highlight
-    assert c.verdict(24) == "highlight"
+    c.update(reading(1, 600), 24)  # first-quarter highlight: one reading could be a misread...
+    assert c.verdict(24) is None
+    c.update(reading(1, 598), 26)  # ...two consistent ones are a highlight
+    assert c.verdict(26) == "highlight"
 
 
 def test_clock_halftime_until_third_quarter():
@@ -227,21 +229,31 @@ def test_clock_other_games_highlights():
     for i in range(20):
         c.update(reading(3, 800 - i * 5), i * 2.0)
     c.update(reading(4, 200, words=("CHIEFS", "BILLS")), 50)  # far ahead, wrong teams
-    assert c.verdict(50) == "other game"
+    c.update(reading(4, 198, words=("CHIEFS", "BILLS")), 52)
+    assert c.verdict(52) == "other game"
     c.update(reading(3, 700, words=("HOLDING",)), 52)  # penalty banner over our own scorebug
     assert c.verdict(52) is None
 
 
-def test_detector_hides_highlights(monkeypatch):
+def test_highlights_during_play_stay_on_screen(monkeypatch):
     shown = {"text": texts("DUKE", "2ND 5:00", "MIAMI")}
     monkeypatch.setattr(gameclock, "read_text", lambda frame: shown["text"])
     det = BreakDetector(read_clock=True)
     assert run(det, broadcast, 0, 120) == State.LIVE
+    shown["text"] = texts("DUKE", "1ST 10:00", "MIAMI")  # a 1st-quarter highlight, mid 2nd quarter
+    assert run(det, broadcast, 120, 140) == State.LIVE  # part of the broadcast: keep watching
+    shown["text"] = texts("DUKE", "2ND 4:50", "MIAMI")
+    assert run(det, broadcast, 140, 145) == State.LIVE
+
+
+def test_highlights_at_halftime_stay_hidden(monkeypatch):
+    shown = {"text": texts("DUKE", "2ND 0:05", "MIAMI")}
+    monkeypatch.setattr(gameclock, "read_text", lambda frame: shown["text"])
+    det = BreakDetector(read_clock=True)
+    run(det, broadcast, 0, 120)  # end of the first half (halftime not confirmed on screen)
     shown["text"] = texts("DUKE", "1ST 10:00", "MIAMI")  # halftime show replaying the 1st quarter
     assert run(det, broadcast, 120, 140) == State.BREAK
     assert det.detail == "highlight"
-    shown["text"] = texts("DUKE", "2ND 4:50", "MIAMI")
-    assert run(det, broadcast, 140, 145) == State.LIVE
 
 
 def test_wrong_model_is_relearned_when_clock_says_live(monkeypatch):
@@ -300,7 +312,8 @@ def test_misread_quarter_on_the_running_clock_is_corrected():
     c.update(reading(2, 120), t)  # "2nd & 4" misread as the quarter, clock still 2:00
     assert c.verdict(t) is None and c.display == "Q3 2:00"
     c.update(reading(1, 400), t + 2)  # a real 1st-quarter highlight
-    assert c.verdict(t + 2) == "highlight"
+    c.update(reading(1, 398), t + 4)
+    assert c.verdict(t + 4) == "highlight"
 
 
 def test_known_network_gives_new_games_a_head_start(tmp_path):

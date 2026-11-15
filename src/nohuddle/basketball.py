@@ -20,6 +20,7 @@ class ReplaySettings:
     cap: float = 45.0  # after this long without overlays, stop giving it the benefit of the doubt
     rate: float = 0.03  # how fast the signature follows the broadcast
     min_samples: int = 20  # frames of clearly-the-game before the signature is trusted
+    back_after: int = 3  # frames of overlays in a row before a replay is over (one stray match isn't)
 
 
 class ReplayByLook:
@@ -33,6 +34,7 @@ class ReplayByLook:
         self._samples = 0
         self._sims: deque[float] = deque(maxlen=3)
         self._gone_since: float | None = None
+        self._overlay_streak = 0
 
     def observe(self, frame_bgr: np.ndarray, *, any_overlay: bool, clearly_game: bool, live: bool, t: float) -> bool:
         """Evidence that this frame is live play despite no overlays. The signature only learns from
@@ -41,9 +43,11 @@ class ReplayByLook:
         hsv = cv2.cvtColor(cv2.resize(frame_bgr, (160, 90), interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2HSV)
         hist = cv2.calcHist([hsv], [0, 1], None, [18, 8], [0, 180, 0, 256])
         hist = cv2.normalize(hist, hist).flatten()
+        self._overlay_streak = self._overlay_streak + 1 if any_overlay else 0
         if any_overlay:
-            self._gone_since = None
-            self._sims.clear()
+            if self._overlay_streak >= self.s.back_after:
+                self._gone_since = None
+                self._sims.clear()
             if live and clearly_game:
                 self._look = hist if self._look is None else (1 - self.s.rate) * self._look + self.s.rate * hist
                 self._samples += 1
