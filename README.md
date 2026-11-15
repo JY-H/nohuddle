@@ -17,7 +17,7 @@ Needs [uv](https://docs.astral.sh/uv/) and Google Chrome (the app drives your in
 - **Watch now** / click a tile / keys `1`–`9` pins a game (manual control). **Resume auto** or `A` unpins.
 - **It's a break** / **Not a break** fix a wrong call. "Not a break" on a detected break makes it relearn that game.
 - **Source** picks a mirror; the app also switches mirrors itself when a stream is laggy or dead.
-- 🏈 / `C` opens an ESPN Fantasycast drawer next to the games. Paste your league's Fantasycast link under Settings; use **Log in to ESPN** once (it opens a normal tab - log in, close it). Inside the app's own browser, ESPN pages are allowed to be embedded and its login cookies are made available to the drawer.
+- 🏈 / `C` opens a drawer with your ESPN fantasy football matchup (live points and projections, both lineups). **Open on ESPN** opens ESPN's own Fantasycast in a tab.
 - 👁 shows what the detector sees (green = overlay visible, red = learned but not visible).
 - Keys: `S` panel, `M` single/multi, `F` fullscreen.
 

@@ -280,71 +280,38 @@ $('#chime').onchange = (e) => localStorage.setItem('chime', e.target.checked ? '
 $('#panel-toggle').onclick = () => document.body.classList.toggle('panel-hidden');
 $('#drawer-toggle').onclick = toggleDrawer;
 
-// ESPN Fantasycast drawer (loaded the first time it's opened).
+// Your fantasy matchup, refreshed while the drawer is open.
+let fantasyTimer = null;
 function toggleFantasy() {
   const open = $('#fantasy').hidden;
   $('#fantasy').hidden = !open;
   $('#fantasy-toggle').classList.toggle('on', open);
   localStorage.setItem('fantasy', open ? 'on' : 'off');
-  if (open && !$('#fantasy-frame').src) $('#fantasy-frame').src = state.fantasycast_url;
+  clearInterval(fantasyTimer);
+  if (open) { loadFantasy(); fantasyTimer = setInterval(loadFantasy, 30000); }
+}
+const pts = (x) => (x == null ? '–' : x.toFixed(1));
+function fantasyTeam(side) {
+  const rows = (list, bench) => list.map((p) => `
+    <div class="fx-row${bench ? ' bench' : ''}"><span class="slot">${esc(p.slot)}</span>
+      <span class="who">${esc(p.name)}<small>${esc(p.team)}</small></span>
+      <span class="p">${pts(p.points)}<small>${pts(p.projected)}</small></span></div>`).join('');
+  return `<div class="fx-side"><h4>${esc(side.name)}</h4>${rows(side.players.filter((p) => p.starter))}
+    <h4>Bench</h4>${rows(side.players.filter((p) => !p.starter), true)}</div>`;
+}
+async function loadFantasy() {
+  const d = await (await fetch('/api/fantasy')).json().catch(() => ({ ok: false, error: 'App not reachable.' }));
+  if (!d.ok) { $('#fantasy-body').innerHTML = `<p class="hint">${esc(d.error)}</p>`; return; }
+  $('#fantasy-title').textContent = `Fantasy · Week ${d.week}`;
+  if (!d.me || !d.opp) { $('#fantasy-body').innerHTML = '<p class="hint">No matchup this week.</p>'; return; }
+  const line = (s, lead) => `<span class="team${lead ? ' lead' : ''}">${esc(s.name)}</span><span class="pts${lead ? ' lead' : ''}">${pts(s.points)}</span>
+    <span class="sub">proj ${pts(s.projected)}${s.win_probability != null ? ` · ${Math.round(s.win_probability * 100)}% to win` : ''}</span><span></span>`;
+  const meLead = d.me.points >= d.opp.points;
+  $('#fantasy-body').innerHTML = `<div class="fx-score">${line(d.me, meLead)}${line(d.opp, !meLead)}</div>
+    ${fantasyTeam(d.me)}${fantasyTeam(d.opp)}<p class="hint">Points · projected. Updates every 30s.</p>`;
 }
 $('#fantasy-toggle').onclick = toggleFantasy;
-$('#fantasy-reload').onclick = () => { $('#fantasy-frame').src = state.fantasycast_url; };
-let fantasyNeedsReload = false;
-$('#espn-login').onclick = () => post('/api/espn-login', {}).then(() => { fantasyNeedsReload = true; },
-  () => {}).then(() =>
-  toast('Log in to ESPN in the new tab, then close it — Fantasycast will reload'));
-$('#save-settings').onclick = () => post('/api/settings', {
-  break_after: +$('#break_after').value, live_after: +$('#live_after').value, site: $('#site').value,
-  fantasycast_url: $('#fantasycast_url').value,
-}).then(() => { document.activeElement.blur(); toast('Settings saved'); });
-
-// ---------- game list ----------
-
-let gameList = [];
-async function loadGames() {
-  const league = $('#league').value;
-  $('#games').innerHTML = '<li class="hint">Loading…</li>';
-  try {
-    const r = await fetch(`/api/games?league=${league}`);
-    const j = await r.json();
-    if (!r.ok) throw new Error(j.error);
-    gameList = j.games;
-    renderGames();
-  } catch (err) {
-    $('#games').innerHTML = `<li class="error">${esc(err.message)}</li>`;
-  }
-}
-function renderGames() {
-  const q = $('#filter').value.toLowerCase();
-  const watched = new Set(state ? state.games.map((g) => g.id) : []);
-  const rows = gameList.filter((g) => !q || g.title.toLowerCase().includes(q)).map((g) => {
-    const when = g.is_live ? 'LIVE' : new Date(g.starts_at * 1000).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
-    return `<li class="${g.is_live ? 'live' : ''}"><span class="name">${esc(g.title)}</span><span class="when">${when}</span>
-      ${watched.has(g.id) ? '<span class="hint">added</span>' : `<button data-url="${esc(g.url)}" data-title="${esc(g.title)}" data-starts="${g.starts_at}" data-ends="${g.ends_at}">＋</button>`}</li>`;
-  });
-  $('#games').innerHTML = rows.join('') || '<li class="hint">No games found.</li>';
-}
-async function addGame(body, button) {
-  $('#add-error').hidden = true;
-  if (button) { button.disabled = true; button.textContent = '…'; }
-  try {
-    await post('/api/watch', body);
-    await poll();
-    renderGames();
-  } catch (err) {
-    $('#add-error').textContent = err.message; $('#add-error').hidden = false;
-    if (button) { button.disabled = false; button.textContent = '＋'; }
-  }
-}
-$('#games').addEventListener('click', (e) => {
-  const b = e.target.closest('button[data-url]');
-  if (b) addGame({ url: b.dataset.url, title: b.dataset.title, starts_at: +b.dataset.starts, ends_at: +b.dataset.ends }, b);
-});
-$('#add-url').onsubmit = (e) => { e.preventDefault(); addGame({ url: $('#url').value }); $('#url').value = ''; };
-$('#league').onchange = loadGames;
-$('#refresh').onclick = loadGames;
-$('#filter').oninput = renderGames;
+$('#espn-open').onclick = () => post('/api/espn-open', {});
 
 // ---------- debug panel ----------
 
@@ -430,8 +397,6 @@ async function poll() {
   await poll();
   $('#league').value = state?.league || 'nfl';
   if (localStorage.getItem('fantasy') === 'on') toggleFantasy();
-  // After logging in (tab closed), reload the drawer so it picks up the login.
-  window.addEventListener('focus', () => { if (!$('#fantasy').hidden && fantasyNeedsReload) { fantasyNeedsReload = false; $('#fantasy-frame').src = state.fantasycast_url; } });
   loadGames();
   setInterval(poll, 500);
 })();

@@ -22,6 +22,7 @@ from . import scheduler
 from .detector import W, H, BreakDetector, DetectorSettings, State
 from .gameclock import ClockSettings
 from .health import PlaybackHealth
+from .fantasy import Fantasy
 from .networks import NetworkLibrary
 from .sports import sport_for
 from .streams import Game, StreamSite
@@ -110,9 +111,7 @@ AD_HOST_PATTERNS = [
     "onclickads", "clickadu", "adcash", "doubleclick", "googlesyndication", "sharethis",
 ]
 DEFAULT_FANTASYCAST = "https://fantasy.espn.com/football/fantasycast"
-# ESPN only lets its own sites frame its pages; inside the app's own browser we lift that for ESPN,
-# so Fantasycast can sit in a drawer next to the games.
-ESPN_RE = re.compile(r"^https://([^/]*\.)?(espn\.com|go\.com|espncdn\.com)/")
+ESPN_RE = re.compile(r"^https://([^/]*\.)?(espn\.com|go\.com)/")
 EMBED_AD_DOMAIN_RE = re.compile(r'"(?:adserverDomain|cdnDomain)"\s*:\s*"([a-z0-9.-]+)"', re.I)
 
 
@@ -152,8 +151,10 @@ class Controller:
         self.auto = cfg.get("auto", True)
         self.mode = cfg.get("mode", "single")  # "single" or "multi"
         env = _local_env()
-        self._espn_cookies = {k: env[k] for k in ("espn_s2", "SWID") if env.get(k)}
         league, team = env.get("ESPN_LEAGUE_ID"), env.get("ESPN_TEAM_ID")
+        # Your fantasy matchup for the drawer, read from ESPN's fantasy API with your session.
+        self.fantasy = Fantasy(league, team, env["espn_s2"], env["SWID"]) \
+            if league and team and env.get("espn_s2") and env.get("SWID") else None
         default_fc = DEFAULT_FANTASYCAST
         if league:
             default_fc += f"?leagueId={league}" + (f"&teamId={team}" if team else "")
@@ -310,33 +311,7 @@ class Controller:
         await ctx.route(re.compile("|".join(AD_HOST_PATTERNS)), lambda r: r.abort())
         # Player pages declare their ad servers in a config blob; read it and block them.
         await ctx.route(re.compile(r"/embed/"), self._inspect_embed)
-        await ctx.route(ESPN_RE, self._allow_espn_framing)
-        await self._share_espn_login()
 
-    async def _allow_espn_framing(self, route: Route) -> None:
-        if route.request.resource_type not in ("document", "iframe"):
-            await route.fallback()
-            return
-        try:
-            resp = await route.fetch()
-        except Exception:
-            await route.fallback()
-            return
-        headers = {k: v for k, v in resp.headers.items() if k.lower() not in ("content-security-policy", "x-frame-options")}
-        await route.fulfill(response=resp, headers=headers)
-
-    async def _share_espn_login(self) -> None:
-        """ESPN's login cookies default to first-party only, so the Fantasycast drawer (an embedded
-        frame) would look logged out. In the app's own browser, let them be sent there too."""
-        if self._espn_cookies:  # a session from .env: log the drawer in directly
-            await self.ctx.add_cookies([{"name": k, "value": v, "domain": ".espn.com", "path": "/",
-                                         "secure": True, "sameSite": "None"} for k, v in self._espn_cookies.items()])
-            log.info("Fantasycast: using the ESPN session from .env")
-        cookies = [c for c in await self.ctx.cookies() if re.search(r"(espn|go)\.com$", c["domain"])]
-        fixed = [{**c, "sameSite": "None", "secure": True} for c in cookies if c.get("sameSite") != "None"]
-        if fixed:
-            await self.ctx.add_cookies(fixed)
-            log.info("Made %d ESPN login cookies available to the Fantasycast drawer", len(fixed))
 
     async def _inspect_embed(self, route: Route) -> None:
         if route.request.resource_type != "document":
@@ -561,7 +536,8 @@ class Controller:
         r.add_get("/api/debug/{gid:.+}.png", self._api_debug)
         r.add_get("/api/debug/{gid:.+}.json", self._api_debug_json)
         r.add_post("/api/report", self._api_report)
-        r.add_post("/api/espn-login", self._api_espn_login)
+        r.add_post("/api/espn-open", self._api_espn_open)
+        r.add_get("/api/fantasy", self._api_fantasy)
         return app
 
     async def _api_games(self, req: web.Request) -> web.Response:
@@ -657,17 +633,21 @@ class Controller:
         self.save()
         return web.json_response({"ok": True})
 
-    async def _api_espn_login(self, req: web.Request) -> web.Response:
-        """Open ESPN in a normal tab to log in (logging in inside the drawer may not stick); when
-        it's closed, make the login usable in the drawer."""
+    async def _api_fantasy(self, req: web.Request) -> web.Response:
+        if self.fantasy is None:
+            return web.json_response({"ok": False, "error": "Fantasy isn't set up for this checkout."})
+        try:
+            return web.json_response({"ok": True, **await self.fantasy.matchup()})
+        except Exception as e:
+            log.warning("Fantasy: couldn't load the matchup: %s", type(e).__name__)
+            return web.json_response({"ok": False, "error": "Couldn't load your matchup from ESPN right now."})
+
+    async def _api_espn_open(self, req: web.Request) -> web.Response:
+        """Open ESPN's own Fantasycast in a normal tab (popups are otherwise closed)."""
         self._expecting_page = True
         page = await self.ctx.new_page()
         self._allowed_pages.add(page)
-
-        async def closed(*_):
-            self._allowed_pages.discard(page)
-            await self._share_espn_login()
-        page.on("close", lambda *_: asyncio.ensure_future(closed()))
+        page.on("close", lambda *_: self._allowed_pages.discard(page))
         await page.goto(self.fantasycast_url)
         await page.bring_to_front()
         return web.json_response({"ok": True})

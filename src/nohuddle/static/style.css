@@ -107,7 +107,19 @@ body.resizing #stage iframe { transition: none; }
 #fantasy-toggle { position: absolute; z-index: 6; right: 96px; top: 8px; opacity: 0; transition: opacity .2s; }
 #stage:hover #fantasy-toggle { opacity: .8; }
 #fantasy-toggle.on { opacity: .8; border-color: var(--accent); }
-#fantasy { width: 420px; flex: none; display: flex; flex-direction: column; background: #fff; border-left: 1px solid var(--line); }
-#fantasy header { padding: 6px 8px; background: var(--panel); border-bottom: 1px solid var(--line); }
+#fantasy { width: 360px; flex: none; display: flex; flex-direction: column; background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; }
+#fantasy header { padding: 8px 10px; border-bottom: 1px solid var(--line); }
 #fantasy header b { flex: 1; }
-#fantasy iframe { flex: 1; width: 100%; border: 0; background: #fff; }
+#fantasy-body { padding: 8px 10px; }
+.fx-score { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: baseline; padding: 6px 0 10px; border-bottom: 1px solid var(--line); }
+.fx-score .team { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fx-score .pts { font-size: 22px; font-weight: 700; text-align: right; }
+.fx-score .sub { color: var(--muted); font-size: 12px; }
+.fx-score .pts.lead { color: var(--live); }
+.fx-side h4 { margin: 12px 0 4px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.fx-row { display: grid; grid-template-columns: 38px 1fr auto; gap: 6px; padding: 3px 0; border-bottom: 1px solid #1c2026; font-size: 12px; }
+.fx-row .slot { color: var(--muted); }
+.fx-row .who small { color: var(--muted); margin-left: 4px; }
+.fx-row .p { text-align: right; font-variant-numeric: tabular-nums; }
+.fx-row .p small { color: var(--muted); margin-left: 4px; }
+.fx-row.bench { opacity: .55; }

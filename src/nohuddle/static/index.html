@@ -15,18 +15,17 @@
     <ul id="empty-list"></ul>
   </div>
   <div id="toast" hidden></div>
-  <button id="fantasy-toggle" title="ESPN Fantasycast (C)">🏈</button>
+  <button id="fantasy-toggle" title="Your fantasy matchup (C)">🏈</button>
   <button id="drawer-toggle" title="Peek at games on a break (B)">▁▁</button>
   <button id="panel-toggle" title="Show/hide panel (S)">☰</button>
 </main>
 
 <aside id="fantasy" hidden>
   <header class="row">
-    <b>Fantasycast</b>
-    <button id="espn-login" title="Opens ESPN in a tab; log in there once, then close the tab">Log in to ESPN</button>
-    <button id="fantasy-reload" title="Reload">↻</button>
+    <b id="fantasy-title">Fantasy</b>
+    <button id="espn-open" title="ESPN's own Fantasycast, in a normal tab">Open on ESPN</button>
   </header>
-  <iframe id="fantasy-frame" title="ESPN Fantasycast"></iframe>
+  <div id="fantasy-body"><p class="hint">Loading your matchup…</p></div>
 </aside>
 
 <aside id="panel">
@@ -83,9 +82,9 @@
       <label>Switch back after <input type="number" id="live_after" min="0.5" step="0.5"> s of it returning</label>
       <label><input type="checkbox" id="chime"> Chime when a game comes back from a break</label>
       <label>Stream site <input id="site"></label>
-      <label>Fantasycast URL <input id="fantasycast_url" placeholder="https://fantasy.espn.com/football/fantasycast?leagueId=…"></label>
+      <label>"Open on ESPN" link <input id="fantasycast_url" placeholder="https://fantasy.espn.com/football/fantasycast"></label>
       <button id="save-settings">Save</button>
-      <p class="hint">Keys: <kbd>S</kbd> panel · <kbd>M</kbd> single/multi · <kbd>F</kbd> fullscreen · <kbd>1</kbd>–<kbd>9</kbd> pin game · <kbd>A</kbd> resume auto · <kbd>B</kbd> peek at games on a break · <kbd>C</kbd> Fantasycast · <kbd>D</kbd> debug the game with sound</p>
+      <p class="hint">Keys: <kbd>S</kbd> panel · <kbd>M</kbd> single/multi · <kbd>F</kbd> fullscreen · <kbd>1</kbd>–<kbd>9</kbd> pin game · <kbd>A</kbd> resume auto · <kbd>B</kbd> peek at games on a break · <kbd>C</kbd> fantasy matchup · <kbd>D</kbd> debug the game with sound</p>
     </details>
   </section>
 </aside>
