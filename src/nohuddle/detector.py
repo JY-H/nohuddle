@@ -314,7 +314,10 @@ class BreakDetector:
             self._recent_overlays.popleft()
         mostly_up = (len(self._recent_overlays) >= 3 and t - self._recent_overlays[0][0] >= self.s.overlay_only_return
                      and np.mean([up for _, up in self._recent_overlays]) >= 0.7)
-        confirmed = not self.clock.readable or self.clock.live(t, within=6.0) or (present and mostly_up)
+        # With seconds left in the half, though, only the clock will do: graphics and logos alone
+        # are the start of the halftime show.
+        confirmed = not self.clock.readable or self.clock.live(t, within=6.0) or (
+            present and mostly_up and not self.clock.half_nearly_over())
         if self.state == State.BREAK:
             if present and t - self._present_since >= self.s.live_after and confirmed:
                 return self._set(State.LIVE, t)

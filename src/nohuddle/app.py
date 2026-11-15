@@ -361,6 +361,8 @@ class Controller:
     def _poll_interval(self, gid: str) -> float:
         if gid == self.active:
             return POLL_ACTIVE
+        if self.active is None and self.watched[gid].detector.state == State.BREAK:
+            return POLL_AWAITED  # nothing on screen: every game on a break is the one we're waiting for
         if self.active in self.priority and gid in self.priority and \
                 self.priority.index(gid) < self.priority.index(self.active) and \
                 self.watched[gid].detector.state == State.BREAK:

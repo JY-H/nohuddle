@@ -106,12 +106,15 @@ def _drop_down_and_distance(texts: list[Text]) -> list[Text]:
     return out
 
 
+PREVIEW_RE = re.compile(r"COMING\s*UP|UP\s*NEXT|STILL\s*TO\s*COME|AHEAD\s*ON")
+
+
 def parse(texts: list[Text]) -> Reading:
     """Turn recognised text into a reading. Pairs the quarter with the clock next to it."""
     r = Reading()
     texts = _drop_down_and_distance([Text(t.s.translate(LOOKALIKES).upper(), t.x, t.y) for t in texts])
     if len({m.group(0)[:5] for m in STAT_PANEL_RE.finditer(" | ".join(t.s for t in texts))}) >= 2:
-        r.halftime = any("HALFTIME" in t.s for t in texts)
+        r.halftime = any("HALFTIME" in t.s for t in texts) and not PREVIEW_RE.search(" | ".join(t.s for t in texts))
         return r  # a stats panel: nothing on it is the game clock
     quarters = [(t, q) for t in texts if (q := _quarter_in(t.s.upper())) is not None]
     clocks = []
@@ -128,6 +131,8 @@ def parse(texts: list[Text]) -> Reading:
         if "HALFTIME" in up or re.fullmatch(r"\s*HALF\s*", up):
             r.halftime = True
         r.words |= {w.strip(".'-") for w in WORD_RE.findall(up)} - STOPWORDS
+    if r.halftime and PREVIEW_RE.search(" | ".join(t.s for t in texts)):
+        r.halftime = False  # "Coming up: halftime" is a promo for it, shown before the half ends
     if not quarters:
         # Some scorebugs print the quarter too small to read; a lone clock can still be paired
         # with the quarter seen moments ago (see GameClock.update).
@@ -334,7 +339,12 @@ class GameClock:
             self._run_n = 0
             if possible < self._half:
                 self.halftime_since, self.halftime_done = None, False
-        if r.halftime:
+        # The clock decides (2ND 0:00, or a long break at the very end of the half - see
+        # note_intermission). A "HALFTIME" graphic (not a "coming up" promo, see parse()) only
+        # counts in the last minutes of the half, or when there's no clock to go by.
+        clock_says = (self.readable and self.max_elapsed is not None
+                      and self.max_elapsed < self._half - self.s.half_end_window)
+        if r.halftime and not clock_says:
             if self._halftime_hint is not None and t - self._halftime_hint <= self.s.confirm_window:
                 self._start_halftime(t, by_clock=True)
             self._halftime_hint = t
@@ -393,6 +403,13 @@ class GameClock:
         if self._run_n < 2 and not self._resumes(e, t):
             return
         self._confirmed_live_at = t
+        if (self.halftime_since is not None and r.quarter == self.s.periods_per_half and r.clock > 0
+                and e >= self.max_elapsed):
+            # Agreeing readings of the 2nd-quarter clock where we left it (stopped for the break) or
+            # further on: the half isn't over. A promo for the halftime show during the last break of
+            # the half isn't halftime. (Replays in the halftime show repeat earlier time.)
+            self.log.append({"t": round(t, 1), "resync": None, "was": self.max_elapsed, "why": "half not over"})
+            self.halftime_since = None
         if e > self.max_elapsed and (e - self.max_elapsed <= self.s.big_jump or self._clock_running(e)):
             self._raise_max(e, t)  # big jumps (e.g. a misread right after a break) need a running clock
         for w in r.words:
@@ -403,9 +420,10 @@ class GameClock:
         if r.quarter == self.s.periods_per_half and r.clock == 0:
             self._start_halftime(t, by_clock=True)
         elif r.quarter is not None and r.quarter > self.s.periods_per_half and (
-                self.halftime_since is None or self._clock_running(e)):
-            # Second half underway - but only believe it once the 3rd-quarter clock actually runs:
-            # a frozen "3RD 15:00" or a graphic can show up during the halftime show.
+                self.halftime_since is None or (self._run_n >= 2 and e > self._half)):
+            # Second half underway - but only believe it once the 3rd-quarter clock has started (two
+            # agreeing readings below 15:00): a frozen "3RD 15:00" can show up during the halftime
+            # show. It needn't be seen running: after the kickoff it often stops at 14:5x.
             self.halftime_since = None
             self.halftime_done = True
 
@@ -452,6 +470,11 @@ class GameClock:
         the halftime show, not live play."""
         return (self.max_elapsed is not None and not self.halftime_done
                 and self.max_elapsed >= self._half - 30)
+
+    def half_nearly_over(self) -> bool:
+        """Seconds left in the 2nd quarter: after the next break, it's likely halftime."""
+        return (self.readable and self.max_elapsed is not None and not self.halftime_done
+                and self._half - 10 <= self.max_elapsed <= self._half)
 
     def mid_half(self) -> bool:
         """The clock says we're well inside a half: no halftime (or pre/post-game) show now."""

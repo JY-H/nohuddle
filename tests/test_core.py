@@ -239,6 +239,22 @@ def test_clock_halftime_until_third_quarter():
     assert not c.in_halftime(904, 4)
 
 
+
+def test_halftime_ends_when_the_third_quarter_clock_has_started():
+    """From a report: after the kickoff the Q3 clock read 14:57, 14:56, 14:54 - never seen running
+    3 seconds - and halftime never ended."""
+    c = GameClock()
+    t = feed(c, 2, 10, 0, 12)
+    c.update(reading(2, 0), t)
+    c.update(reading(2, 0), t + 2)
+    assert c.in_halftime(t + 2, 0)
+    c.update(reading(3, 900), t + 600)  # frozen "3RD 15:00" in the halftime show
+    c.update(reading(3, 900), t + 604)
+    assert c.in_halftime(t + 604, 0)
+    c.update(reading(3, 896), t + 1000)
+    c.update(reading(3, 896), t + 1004)  # kickoff done, clock stopped
+    assert not c.in_halftime(t + 1004, 4)
+
 def test_clock_other_games_highlights():
     c = GameClock()
     for i in range(20):
@@ -561,6 +577,54 @@ def test_long_break_mid_second_quarter_is_not_halftime():
     c2.reset_position(410)  # "Not a break"
     assert not c2.in_halftime(410, 0)
 
+
+
+def test_halftime_bumper_late_in_the_half_is_not_halftime():
+    """From a report: "Coming up: Verizon Halftime" during the break at Q2 0:32 started halftime,
+    and play resuming at Q2 0:28 didn't end it."""
+    c = GameClock()
+    t = feed(c, 2, 45, 0, 14)  # Q2 0:45 -> 0:33
+    promo = parse(texts("COMING UP", "VERIZON HALFTIME", "BIG INJURIES TO BOTH TEAMS"))
+    c.update(promo, t + 20)
+    c.update(promo, t + 22)
+    assert not c.in_halftime(t + 22, 0)
+    c.update(Reading(halftime=True), t + 24)  # a halftime graphic this close to the end could be it
+    c.update(Reading(halftime=True), t + 26)
+    assert c.in_halftime(t + 26, 0)
+    c.update(reading(2, 33), t + 90)
+    c.update(reading(2, 33), t + 94)  # back from the break, clock still stopped where it was
+    assert not c.in_halftime(t + 94, 4)
+    assert not promo.halftime
+    assert parse(texts("VERIZON HALFTIME", "DETROIT 21", "NEW ENGLAND 3")).halftime
+
+
+
+def test_halftime_graphic_mid_half_is_ignored_when_the_clock_reads():
+    c = GameClock()
+    t = feed(c, 2, 500, 0, 20)  # Q2 8:20
+    c.update(Reading(halftime=True), t)
+    c.update(Reading(halftime=True), t + 2)
+    assert not c.in_halftime(t + 2, 0)
+
+
+def test_graphics_alone_dont_bring_a_game_back_with_seconds_left_in_the_half(monkeypatch):
+    """From a replay: with 0:03 left, the halftime show's stat cards (logo up, no clock) were shown."""
+    clock = iter(range(20, 0, -1))
+    monkeypatch.setattr(gameclock, "read_text", lambda frame: texts("CARDINALS", f"2ND :{max(3, next(clock, 3)):02d}", "SEAHAWKS"))
+    det = BreakDetector(read_clock=True)
+    run(det, broadcast, 0, 150)
+    monkeypatch.setattr(gameclock, "read_text", lambda frame: [])
+    assert run(det, scene, 150, 170) == State.BREAK
+    assert run(det, broadcast, 170, 200) == State.BREAK  # overlays, but no clock: halftime show
+
+def test_halftime_replays_of_the_end_of_the_half_stay_halftime():
+    c = GameClock()
+    t = feed(c, 2, 20, 0, 24)  # down to 2ND 0:00
+    c.update(reading(2, 0), t)
+    c.update(reading(2, 0), t + 2)
+    assert c.in_halftime(t + 2, 0)
+    feed(c, 2, 15, t + 300, 10)  # the halftime show replays the last drive
+    assert c.in_halftime(t + 310, 10)
 
 def test_fantasy_stat_lines():
     from nohuddle.fantasy import stat_line
