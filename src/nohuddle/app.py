@@ -23,6 +23,7 @@ from .detector import W, H, BreakDetector, DetectorSettings, State
 from .gameclock import ClockSettings
 from .health import PlaybackHealth
 from .networks import NetworkLibrary
+from .sports import sport_for
 from .streams import Game, StreamSite
 
 log = logging.getLogger("nohuddle")
@@ -176,13 +177,16 @@ class Controller:
         self.priority.append(game.id)
 
     def _new_detector(self, game: Game, embed_index: int) -> BreakDetector:
+        sport = sport_for(game.league)
         clock = ClockSettings(
             kickoff=float(game.starts_at),
-            # NFL halftime is ~13 minutes; college is usually 20.
-            min_halftime=(12 if game.league == "nfl" else 18) * 60,
+            min_halftime=sport.min_halftime,
+            period_seconds=sport.period_seconds,
+            periods_per_half=sport.periods_per_half,
         )
         shares = game.league in LIBRARY_LEAGUES
-        d = BreakDetector(self.settings, clock, networks=self.library.candidates if shares else None)
+        d = BreakDetector(self.settings, clock, networks=self.library.candidates if shares else None,
+                          extras=sport.make_extras())
         path = self._model_path(game.id, embed_index)
         if path.exists():
             try:

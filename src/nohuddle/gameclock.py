@@ -21,7 +21,7 @@ from difflib import SequenceMatcher
 import cv2
 import numpy as np
 
-QUARTER_SECONDS = 15 * 60
+MAX_CLOCK_SECONDS = 20 * 60  # longest period in any sport we read (college basketball halves)
 SUFFIX = {1: "ST", 2: "ND", 3: "RD", 4: "TH"}
 QUARTER_RE = re.compile(r"(?<![\d:])([1-4])([A-Z0-9]{2})(?![A-Z0-9])")
 # "6:34", "6.34" (OCR), "6:4631" (clock run into the play clock); not "9:30 PM".
@@ -61,12 +61,11 @@ class Reading:
     halftime: bool = False
     words: set[str] = field(default_factory=set)
 
-    @property
-    def elapsed(self) -> int | None:
-        """Game seconds elapsed (assumes 15-minute quarters; overtime counts on from the 4th)."""
-        if self.quarter is None or self.clock is None or self.clock > QUARTER_SECONDS:
+    def elapsed(self, period: int) -> int | None:
+        """Game seconds elapsed, for periods of `period` seconds (overtime counts on from the end)."""
+        if self.quarter is None or self.clock is None or self.clock > period:
             return None
-        return (self.quarter - 1) * QUARTER_SECONDS + (QUARTER_SECONDS - self.clock)
+        return (self.quarter - 1) * period + (period - self.clock)
 
 
 def _quarter_match(s: str) -> re.Match | None:
@@ -117,7 +116,7 @@ def parse(texts: list[Text]) -> Reading:
     for t in texts:
         for m in CLOCK_RE.finditer(t.s.upper()):
             mins, secs = int(m.group(1)), int(m.group(2))
-            if secs < 60 and mins * 60 + secs <= QUARTER_SECONDS:
+            if secs < 60 and mins * 60 + secs <= MAX_CLOCK_SECONDS:
                 clocks.append((t, mins * 60 + secs))
         if (qm := _quarter_match(t.s.upper())) and (sm := SUBMINUTE_AFTER_QUARTER_RE.match(t.s.upper(), qm.end())):
             if int(sm.group(1)) < 60:
@@ -238,6 +237,8 @@ class ClockSettings:
     max_halftime: float = 35 * 60  # give up on a halftime that never ends (missed the 3rd-qtr read)
     min_team_readings: int = 15  # readings needed before trusting the learned team names
     kickoff: float = 0.0  # wall time the game started, if known
+    period_seconds: int = 15 * 60  # length of a quarter (or half); set per sport, see sports.py
+    periods_per_half: int = 2  # quarters (2) or halves (1)
     # 60 minutes of game clock take ~3 hours (even the quickest games ~2h40), so by wall-clock time
     # since kickoff the game can't be further along than this fraction (plus pregame slack).
     max_pace: float = 0.6
@@ -287,6 +288,14 @@ class GameClock:
         return [w for w, c in sorted(self.team_counts.items(), key=lambda kv: -kv[1])
                 if c >= 0.3 * self.team_readings][:4]
 
+    @property
+    def _period(self) -> int:
+        return self.s.period_seconds
+
+    @property
+    def _half(self) -> int:
+        return self.s.period_seconds * self.s.periods_per_half
+
     def _max_possible(self, t: float) -> float:
         """The furthest the game can be by now, going by kickoff time (inf if unknown)."""
         if not self.s.kickoff or t < self.s.kickoff:
@@ -305,7 +314,7 @@ class GameClock:
             self.max_elapsed, self._quarter = None, None
             self._run_start = self._run_last = None
             self._run_n = 0
-            if possible < 2 * QUARTER_SECONDS:
+            if possible < self._half:
                 self.halftime_since, self.halftime_done = None, False
         if r.halftime:
             if self._halftime_hint is not None and t - self._halftime_hint <= self.s.confirm_window:
@@ -319,16 +328,16 @@ class GameClock:
         if r.quarter is None and r.clock is not None and self.max_elapsed is not None:
             # Quarter unreadable for a while (some scorebugs print it tiny): if the clock is still
             # counting down within the quarter the game was last in, it's that quarter.
-            q = min(5, self.max_elapsed // QUARTER_SECONDS + 1)
-            if r.clock <= QUARTER_SECONDS - self.max_elapsed % QUARTER_SECONDS + 30:
+            q = min(5, self.max_elapsed // self._period + 1)
+            if r.clock <= self._period - self.max_elapsed % self._period + 30:
                 r = Reading(q, r.clock, r.halftime, r.words)
         if r.quarter is not None and r.clock is not None and self._quarter and r.quarter != self._quarter[1]:
             # A clock that continues the one running right now, to the second, is the live game
             # whatever the quarter said: misreads ("2nd & 4" as a quarter) beat coincidences.
             alt = Reading(self._quarter[1], r.clock, r.halftime, r.words)
-            if self._continues_run(t, alt.elapsed):
+            if self._continues_run(t, alt.elapsed(self._period)):
                 r = alt
-        e = r.elapsed
+        e = r.elapsed(self._period)
         if e is None:
             return
         if e > possible:
@@ -370,11 +379,12 @@ class GameClock:
         for w in r.words:
             self.team_counts[w] = self.team_counts.get(w, 0) + 1
         self.team_readings += 1
-        if r.quarter is not None and r.quarter <= 2 and self.halftime_done:
+        if r.quarter is not None and r.quarter <= self.s.periods_per_half and self.halftime_done:
             self.halftime_done = False  # still in the first half: whatever said otherwise was wrong
-        if r.quarter == 2 and r.clock == 0:
+        if r.quarter == self.s.periods_per_half and r.clock == 0:
             self._start_halftime(t, by_clock=True)
-        elif r.quarter is not None and r.quarter >= 3 and (self.halftime_since is None or self._clock_running(e)):
+        elif r.quarter is not None and r.quarter > self.s.periods_per_half and (
+                self.halftime_since is None or self._clock_running(e)):
             # Second half underway - but only believe it once the 3rd-quarter clock actually runs:
             # a frozen "3RD 15:00" or a graphic can show up during the halftime show.
             self.halftime_since = None
@@ -423,12 +433,12 @@ class GameClock:
             lo, hi = self.s.halftime_window
             if not self.s.kickoff or lo <= t - self.s.kickoff <= hi:
                 self._start_halftime(t, by_clock=False)
-        elif self.max_elapsed is not None and QUARTER_SECONDS <= self.max_elapsed <= 2 * QUARTER_SECONDS:
+        elif self.max_elapsed is not None and self._half - self._period <= self.max_elapsed <= self._half:
             self._start_halftime(t, by_clock=True)
 
     def _start_halftime(self, t: float, by_clock: bool) -> None:
         if self.halftime_since is None and not self.halftime_done and \
-                (self.max_elapsed is None or self.max_elapsed <= 2 * QUARTER_SECONDS):
+                (self.max_elapsed is None or self.max_elapsed <= self._half):
             self.halftime_since = t
             self.halftime_by_clock = by_clock
 
@@ -449,7 +459,7 @@ class GameClock:
             self.halftime_since = None
             self.halftime_done = True
             # Halftime is over, so whatever the clock said, we're in the second half now.
-            self._raise_max(2 * QUARTER_SECONDS, t)
+            self._raise_max(self._half, t)
         return not ended
 
     def live(self, t: float, within: float = 3.0) -> bool:

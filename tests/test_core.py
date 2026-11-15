@@ -411,11 +411,47 @@ def test_halftime_stats_panel_is_not_the_second_half():
     assert not c.in_halftime(1510, 0) and c.live(1508)
 
 
-def test_replay_without_overlays_stays_on_screen():
-    det = BreakDetector(read_clock=False)
+def test_basketball_replay_without_overlays_stays_on_screen():
+    from nohuddle.sports import NBA
+    det = BreakDetector(read_clock=False, extras=NBA.make_extras())
     run(det, broadcast, 0, 150)
     assert run(det, field, 150, 165) == State.LIVE  # 15s replay: no scorebug or logo, same game
     assert run(det, broadcast, 165, 170) == State.LIVE
     assert run(det, scene, 170, 180) == State.BREAK  # an actual ad still goes to break
     run(det, broadcast, 180, 200)
     assert run(det, field, 200, 260) == State.BREAK  # but not forever
+
+
+def test_ad_blip_does_not_flip_a_readable_game_live(monkeypatch):
+    """From a report: an ad briefly matched an overlay, then its colours were learned as the game's."""
+    shown = {"text": texts("LSU", "3RD 9:51", "TEXAS")}
+    monkeypatch.setattr(gameclock, "read_text", lambda frame: shown["text"])
+    det = BreakDetector(read_clock=True)
+    run(det, broadcast, 0, 150)
+    shown["text"] = []  # commercial break: no clock
+    assert run(det, scene, 150, 200) == State.BREAK
+    assert run(det, broadcast, 200, 203) == State.BREAK  # overlays for 3s in an ad: not enough
+    assert run(det, scene, 203, 240) == State.BREAK  # and it didn't learn the ad's colours
+    shown["text"] = texts("LSU", "3RD 9:50", "TEXAS")  # the game is back, clock and all
+    assert run(det, broadcast, 240, 244) == State.LIVE
+
+
+def test_replay_rule_is_off_for_football():
+    from nohuddle.sports import NFL, COLLEGE_FOOTBALL
+    assert not NFL.make_extras() and not COLLEGE_FOOTBALL.make_extras()
+    det = BreakDetector(read_clock=False, extras=NFL.make_extras())
+    run(det, broadcast, 0, 150)
+    assert run(det, field, 150, 165) == State.BREAK
+
+
+def test_nba_clock_uses_12_minute_quarters():
+    from nohuddle.gameclock import ClockSettings
+    from nohuddle.sports import NBA
+    c = GameClock(ClockSettings(period_seconds=NBA.period_seconds, periods_per_half=NBA.periods_per_half))
+    feed(c, 2, 30, 0, 34)  # end of the 2nd quarter
+    assert c.max_elapsed == 2 * 720  # halftime at 24 minutes of game clock, not 30
+    c.update(reading(2, 0), 40)
+    c.update(reading(2, 0), 42)
+    assert c.in_halftime(42, 0)
+    feed(c, 3, 720, 900, 10)  # 3rd quarter tips off at 12:00
+    assert not c.in_halftime(910, 0) and c.display.startswith("Q3 11:")

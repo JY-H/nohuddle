@@ -34,6 +34,10 @@ Live broadcasts have graphics composited over the picture: the scorebug, the net
 
 Learned overlays are saved per game and source, so restarting mid-game (or mid-halftime) doesn't start from scratch.
 
+### Per-sport behaviour
+
+The detector and game clock are sport-agnostic. `sports.py` maps each league to a profile: period length (NFL/college football 15 min, NBA 12, WNBA 10, college basketball 20-minute halves), the halftime fallback, and any sport-specific rules to plug in. Rules tuned for one sport live in their own module and only attach to that sport: `basketball.py` keeps overlay-free replays on screen when the picture still looks like the game (basketball replays often drop the scorebug *and* logo); football doesn't use it.
+
 ### Game clock (macOS)
 
 Edge matching knows *a* scorebug is on screen but not *when* it's from — halftime shows replay first-quarter plays with the old scorebug burned in. So every ~2s the scorebug is read with macOS's built-in text recognition (Vision; local, ~50ms) to get the quarter and clock:
