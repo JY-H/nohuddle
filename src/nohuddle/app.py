@@ -558,12 +558,20 @@ class Controller:
         return web.json_response({"ok": True})
 
     async def _api_override(self, req: web.Request) -> web.Response:
+        """A manual correction means detection got it wrong: save a report of the state *before*
+        applying it, so every mistake from a session is there to analyse afterwards."""
         body = await req.json()
         w = self.watched.get(body["id"])
-        if w:
-            w.detector.force(State(body["state"]), time.time())
-            self._reschedule()
-        return web.json_response({"ok": True})
+        if w is None:
+            raise web.HTTPNotFound()
+        state = State(body["state"])
+        was = f"{w.detector.state}{' (' + w.detector.detail + ')' if w.detector.detail and w.detector.state != State.LIVE else ''}"
+        said = "it's a break" if state == State.BREAK else "not a break"
+        folder = self._save_report(w, f"auto: you marked '{said}' while it was {was}")
+        w.detector.force(state, time.time())
+        self._event(f"⚠ Correction: {w.game.title} marked '{said}' (was {was}); report saved")
+        self._reschedule()
+        return web.json_response({"ok": True, "path": str(folder)})
 
     async def _api_mirror(self, req: web.Request) -> web.Response:
         body = await req.json()
@@ -620,15 +628,18 @@ class Controller:
         return web.Response(body=png, content_type="image/png", headers={"Cache-Control": "no-store"})
 
     async def _api_report(self, req: web.Request) -> web.Response:
-        """Save everything about a game (and the overall state) for later diagnosis."""
         body = await req.json()
         w = self.watched.get(body.get("id"))
         if w is None:
             raise web.HTTPNotFound()
+        return web.json_response({"ok": True, "path": str(self._save_report(w, body.get("note", "")))})
+
+    def _save_report(self, w: Watched, note: str) -> Path:
+        """Save everything about a game (and the overall state) for later diagnosis."""
         slug = w.game.id.rsplit("/", 1)[-1]
         folder = CONFIG_DIR / "reports" / f"{datetime.now():%Y%m%d-%H%M%S}-{slug}"
         (folder / "frames").mkdir(parents=True)
-        report = {"note": body.get("note", ""), "saved_at": time.time(), "game": self._debug_info(w),
+        report = {"note": note, "saved_at": time.time(), "game": self._debug_info(w),
                   "app": self._state_json()}
         (folder / "report.json").write_text(json.dumps(report, indent=2, default=str))
         if png := self._debug_png(w):
@@ -636,4 +647,4 @@ class Controller:
         for t, jpeg in list(w.recent_jpegs):
             (folder / "frames" / f"{t:.1f}.jpg").write_bytes(jpeg)
         log.info("Saved report to %s", folder)
-        return web.json_response({"ok": True, "path": str(folder)})
+        return folder

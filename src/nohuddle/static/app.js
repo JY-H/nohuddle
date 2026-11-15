@@ -245,7 +245,9 @@ $('#watchlist').addEventListener('click', (e) => {
   if (!act || !id) return;
   if (act === 'debug') return openDebug(id);
   if (act === 'pin') post('/api/pin', { id: state.pinned === id ? null : id });
-  if (act === 'live' || act === 'break') post('/api/override', { id, state: act });
+  if (act === 'live' || act === 'break') {
+    post('/api/override', { id, state: act }).then(() => toast('Correction noted — report saved for later'));
+  }
   if (act === 'remove') post('/api/unwatch', { id });
 });
 $('#watchlist').addEventListener('change', (e) => {

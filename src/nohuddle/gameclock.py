@@ -36,7 +36,7 @@ NOT_A_QUARTER_AFTER = re.compile(r"[\s.,:;]*(&|AND\b|DOWNS?\b|HALF\b|TEAM\b|8\s*
 # "3rd DOWNS" reads as a quarter and time of possession ("14:56") as a game clock.
 STAT_PANEL_RE = re.compile(r"TOTAL\s*YAR|TURNOVERS|POSSESSION|TIME OF POS|\bT\.?O\.?P\b|(?:1ST|3RD|4TH|FIRST|THIRD|FOURTH)\s*DOWNS|PENALTIES|RUSHING\s*YARDS|PASSING\s*YARDS|\bSACKS\b|TACKLES")  # "2ND & 10", "2ND DOWN", "1ST HALF"
 # Drive summaries ("SCORING DRIVE · 8 PLAYS · 75 YARDS · 2:20 TIME") show a duration, not the clock.
-DRIVE_SUMMARY_RE = re.compile(r"SCORING\s*DRIVE|DRIVE\s*SUMMARY|THIS\s*DRIVE")
+DRIVE_SUMMARY_RE = re.compile(r"(?:SCORING|CURRENT)\s*DRIVE|DRIVE\s*SUMMARY|THIS\s*DRIVE")
 WORD_RE = re.compile(r"[A-Z][A-Z.'-]{2,}")
 STOPWORDS = {
     "QUARTER", "QTR", "DOWN", "GOAL", "HALF", "HALFTIME", "FINAL", "TIMEOUT", "FLAG", "REVIEW",
@@ -244,6 +244,7 @@ class ClockSettings:
     quarter_memory: float = 180.0  # how long a read quarter is assumed for quarter-less readings
     resume_slack: float = 30.0  # game seconds a lone reading may differ from where we were and still count
     big_jump: float = 60.0  # moving the position further ahead than this needs a running clock
+    half_end_window: float = 120.0  # game seconds before the half in which a long break can be halftime
     verdict_ttl: float = 8.0  # how long a single reading's verdict stands
     min_halftime: float = 12 * 60  # fallback when the clock can't be read: NFL ~13 min
     halftime_resume_scorebug: float = 30.0  # ...and the scorebug back this long
@@ -456,6 +457,7 @@ class GameClock:
         """Forget where we think the game is (the user says what's on screen is live)."""
         self.log.append({"t": round(t, 1), "resync": None, "was": self.max_elapsed, "why": "reset by you"})
         self.max_elapsed, self._quarter, self._verdict = None, None, None
+        self.halftime_since = None  # a halftime we inferred was wrong too
         self._run_start = self._run_last = None
         self._run_n = 0
         self._run_pending = None
@@ -479,7 +481,8 @@ class GameClock:
             lo, hi = self.s.halftime_window
             if not self.s.kickoff or lo <= t - self.s.kickoff <= hi:
                 self._start_halftime(t, by_clock=False)
-        elif self.max_elapsed is not None and self._half - self._period <= self.max_elapsed <= self._half:
+        elif self.max_elapsed is not None and self._half - self.s.half_end_window <= self.max_elapsed <= self._half:
+            # Only near the end of the half: a long break at "2ND 8:25" is just a long break.
             self._start_halftime(t, by_clock=True)
 
     def _start_halftime(self, t: float, by_clock: bool) -> None:

@@ -506,3 +506,17 @@ def test_return_after_a_score_with_graphics_flickering(monkeypatch):
     assert run(det, scene, 150, 170) == State.BREAK
     states = [det.observe(broadcast(t) if t % 5 else scene(t), float(t)) for t in range(170, 190)]
     assert states[-1] == State.LIVE  # overlays up 80% of the time: back on screen
+
+
+def test_long_break_mid_second_quarter_is_not_halftime():
+    """From a report: a 5+ minute break at Q2 8:25 was taken for halftime."""
+    c = GameClock()
+    feed(c, 2, 515, 0, 10)  # Q2 8:35 -> 8:25
+    c.note_intermission(400)  # long break
+    assert not c.in_halftime(400, 0)
+    c2 = GameClock()
+    feed(c2, 2, 100, 0, 10)  # Q2 1:40: a long break now is halftime
+    c2.note_intermission(400)
+    assert c2.in_halftime(400, 0)
+    c2.reset_position(410)  # "Not a break"
+    assert not c2.in_halftime(410, 0)
