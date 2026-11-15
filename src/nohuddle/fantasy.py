@@ -4,6 +4,7 @@ Reads your own league from ESPN's fantasy API with your ESPN session (espn_s2 / 
 what that API accepts - ESPN's Fantasycast *website* wants a full MyDisney login instead.
 """
 
+import json
 import time
 from datetime import date
 
@@ -19,6 +20,20 @@ PRO_TEAMS = {
     21: "PHI", 22: "ARI", 23: "PIT", 24: "LAC", 25: "SF", 26: "SEA", 27: "TB", 28: "WSH", 29: "CAR",
     30: "JAX", 33: "BAL", 34: "HOU",
 }
+
+NICKNAMES = {
+    "Falcons": "ATL", "Bills": "BUF", "Bears": "CHI", "Bengals": "CIN", "Browns": "CLE", "Cowboys": "DAL",
+    "Broncos": "DEN", "Lions": "DET", "Packers": "GB", "Titans": "TEN", "Colts": "IND", "Chiefs": "KC",
+    "Raiders": "LV", "Rams": "LAR", "Dolphins": "MIA", "Vikings": "MIN", "Patriots": "NE", "Saints": "NO",
+    "Giants": "NYG", "Jets": "NYJ", "Eagles": "PHI", "Cardinals": "ARI", "Steelers": "PIT", "Chargers": "LAC",
+    "49ers": "SF", "Seahawks": "SEA", "Buccaneers": "TB", "Commanders": "WSH", "Panthers": "CAR",
+    "Jaguars": "JAX", "Ravens": "BAL", "Texans": "HOU",
+}
+
+
+def pro_teams_in(title: str) -> set[str]:
+    """The NFL teams in a game's title, e.g. "Detroit Lions vs New England Patriots" -> {DET, NE}."""
+    return {abbrev for word in title.replace("-", " ").split() if (abbrev := NICKNAMES.get(word))}
 
 
 # ESPN stat IDs, each checked against real box scores (e.g. completions + incompletions = attempts,
@@ -61,37 +76,82 @@ def current_season(today: date | None = None) -> int:
 
 
 class Fantasy:
+    """Reads are cached: the league (teams, current week) for an hour, scores for 30s - and only
+    what's being looked at is fetched, filtered server-side (the unfiltered week is ~7 MB)."""
+
     def __init__(self, league_id: str, team_id: str, espn_s2: str, swid: str, cache_seconds: float = 30.0):
         self.league_id, self.team_id = league_id, int(team_id)
         self._cookies = {"espn_s2": espn_s2, "SWID": swid}
-        self._cache: tuple[float, dict] | None = None
+        self._cache: dict[object, tuple[float, object]] = {}
         self._cache_seconds = cache_seconds
 
-    async def matchup(self) -> dict:
-        if self._cache and time.time() - self._cache[0] < self._cache_seconds:
-            return self._cache[1]
+    async def _get(self, query: str, filter_: dict | None = None) -> dict:
         base = API.format(season=current_season(), league=self.league_id)
-        async with aiohttp.ClientSession(cookies=self._cookies, headers={"User-Agent": "Mozilla/5.0"},
+        headers = {"User-Agent": "Mozilla/5.0"}
+        if filter_:
+            headers["x-fantasy-filter"] = json.dumps(filter_)
+        async with aiohttp.ClientSession(cookies=self._cookies, headers=headers,
                                          timeout=aiohttp.ClientTimeout(total=15)) as s:
-            async with s.get(base + "?view=mTeam&view=mSettings") as r:
+            async with s.get(base + query) as r:
                 r.raise_for_status()
-                league = await r.json(content_type=None)
-            period, scoring = league["status"]["currentMatchupPeriod"], league["scoringPeriodId"]
-            async with s.get(base + f"?view=mMatchupScore&view=mBoxscore&view=mRoster&scoringPeriodId={scoring}") as r:
-                r.raise_for_status()
-                box = await r.json(content_type=None)
-        teams = {t["id"]: t for t in league.get("teams", [])}
-        game = next((m for m in box.get("schedule", []) if m.get("matchupPeriodId") == period
-                     and self.team_id in (m.get("home", {}).get("teamId"), m.get("away", {}).get("teamId"))), None)
-        if game is None:
-            result = {"week": period, "me": None, "opp": None}
-        else:
-            mine = "home" if game["home"]["teamId"] == self.team_id else "away"
-            result = {"week": period,
-                      "me": self._side(game.get(mine, {}), teams, scoring),
-                      "opp": self._side(game.get("away" if mine == "home" else "home", {}), teams, scoring)}
-        self._cache = (time.time(), result)
+                return await r.json(content_type=None)
+
+    async def _cached(self, key: object, ttl: float, fetch) -> object:
+        hit = self._cache.get(key)
+        if hit and time.time() - hit[0] < ttl:
+            return hit[1]
+        value = await fetch()
+        self._cache[key] = (time.time(), value)
+        return value
+
+    async def _league(self) -> dict:
+        async def fetch():
+            d = await self._get("?view=mTeam&view=mSettings")
+            return {"period": d["status"]["currentMatchupPeriod"], "scoring": d["scoringPeriodId"],
+                    "teams": {t["id"]: t for t in d.get("teams", [])}}
+        return await self._cached("league", 3600, fetch)
+
+    async def _week(self, team_id: int | None) -> tuple[dict, list[dict]]:
+        """This week's matchups (all of them, or just `team_id`'s), with rosters and live points."""
+        lg = await self._league()
+        flt = {"schedule": {"filterMatchupPeriodIds": {"value": [lg["period"]]}}}
+        if team_id is not None:
+            flt["schedule"]["filterTeamIds"] = {"value": [team_id]}
+
+        async def fetch():
+            d = await self._get(f"?view=mMatchupScore&view=mBoxscore&scoringPeriodId={lg['scoring']}", flt)
+            return [m for m in d.get("schedule", []) if m.get("matchupPeriodId") == lg["period"]]
+        return lg, await self._cached(("week", team_id), self._cache_seconds, fetch)
+
+    async def matchup(self, team_id: int | None = None) -> dict:
+        """`team_id`'s matchup this week (yours by default), plus the league's teams to pick from."""
+        team_id = team_id or self.team_id
+        lg, games = await self._week(team_id)
+        game = next((m for m in games if team_id in (m.get("home", {}).get("teamId"), m.get("away", {}).get("teamId"))), None)
+        result = {"week": lg["period"], "team_id": team_id, "my_team_id": self.team_id,
+                  "teams": sorted(({"id": i, "name": t.get("name") or t.get("abbrev", "?")} for i, t in lg["teams"].items()),
+                                  key=lambda t: (t["id"] != self.team_id, t["name"].lower())),
+                  "me": None, "opp": None}
+        if game is not None:
+            mine = "home" if game["home"]["teamId"] == team_id else "away"
+            result["me"] = self._side(game.get(mine, {}), lg["teams"], lg["scoring"])
+            result["opp"] = self._side(game.get("away" if mine == "home" else "home", {}), lg["teams"], lg["scoring"])
         return result
+
+    async def started_in(self, pro_teams: set[str]) -> dict:
+        """Every fantasy team's starters who play for `pro_teams` (e.g. the game on screen)."""
+        lg, games = await self._week(None)
+        players = []
+        for m in games:
+            for key in ("home", "away"):
+                side = self._side(m.get(key, {}), lg["teams"], lg["scoring"])
+                if side is None:
+                    continue
+                players += [{**p, "fantasy_team": side["name"], "fantasy_team_id": side["id"],
+                             "mine": side["id"] == self.team_id}
+                            for p in side["players"] if p["starter"] and p["team"] in pro_teams]
+        players.sort(key=lambda p: (not p["mine"], p["team"], -p["points"]))
+        return {"week": lg["period"], "players": players}
 
     @staticmethod
     def _side(side: dict, teams: dict, scoring: int) -> dict | None:
@@ -114,7 +174,7 @@ class Fantasy:
             })
         players.sort(key=lambda x: x.pop("_order"))
         return {
-            "name": team.get("name") or team.get("abbrev", "?"), "abbrev": team.get("abbrev", ""),
+            "id": side.get("teamId"), "name": team.get("name") or team.get("abbrev", "?"), "abbrev": team.get("abbrev", ""),
             "points": round(side.get("totalPointsLive", side.get("totalPoints")) or 0, 1),
             "projected": round(side.get("totalProjectedPointsLive", side.get("totalProjectedPoints")) or 0, 1),
             "win_probability": side.get("winProbability"),

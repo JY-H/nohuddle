@@ -25,6 +25,11 @@
     <b id="fantasy-title">Fantasy</b>
     <button id="espn-open" title="ESPN's own Fantasycast, in a normal tab">Open on ESPN</button>
   </header>
+  <nav class="fx-tabs">
+    <button data-tab="matchup" class="on">Matchup</button>
+    <button data-tab="on-screen" title="Started players (any team in your league) in the game with sound">In this game</button>
+    <select id="fx-team" title="Whose matchup"></select>
+  </nav>
   <div id="fantasy-body"><p class="hint">Loading your matchup…</p></div>
 </aside>
 
@@ -36,6 +41,9 @@
         <button data-mode="single">Single</button>
         <button data-mode="multi">Multiview</button>
       </div>
+      <select id="max-tiles" title="Multiview: at most this many games at once (highest priority first)">
+        <option value="2">2 games</option><option value="3">3 games</option><option value="4">4 games</option><option value="0">All games</option>
+      </select>
       <label class="switch"><input type="checkbox" id="auto"> Auto-switch</label>
     </div>
     <div id="pinned" hidden>📌 Pinned: <b id="pinned-title"></b> <button id="unpin">Resume auto</button></div>

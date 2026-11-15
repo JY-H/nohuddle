@@ -86,6 +86,9 @@ class DetectorSettings:
     # Coming back from a break on a game whose clock can be read: the clock must agree, or the
     # overlays must stay up this long (OCR can miss a few reads). A blip in an ad isn't enough.
     overlay_only_return: float = 6.0
+    # A game whose clock hasn't been read isn't shown before the scheduled start, less this, plus
+    # the grace above: 15s before the start at the earliest.
+    pregame_ends_before: float = 60.0
 
 
 def preprocess(frame_bgr: np.ndarray) -> np.ndarray:
@@ -146,6 +149,13 @@ class OverlayModel:
         return [(int(c.start), int(r.start), int(c.stop - c.start), int(r.stop - r.start)) for r, c, _ in self.regions]
 
 
+def scorebug_up(scores: list[float], primary: int, s: DetectorSettings) -> bool:
+    """The scorebug, or two overlays at once: one small region (a team logo, a corner bug) alone
+    can match an ad's fine print or a studio show's sidebar frame after frame."""
+    hits = [sc >= s.region_match for sc in scores]
+    return bool(hits) and (hits[primary] or sum(hits) >= 2)
+
+
 class BreakDetector:
     def __init__(self, settings: DetectorSettings | None = None, clock_settings: ClockSettings | None = None,
                  read_clock: bool = gameclock.OCR_AVAILABLE,
@@ -196,7 +206,17 @@ class BreakDetector:
             return True
         if self.state != State.LEARNING or self.clock.readable or self._first_seen is None:
             return False
-        return t - max(self.since, self._first_seen) >= self.s.unverified_grace
+        if self.model is None or not self.model.regions:
+            return False  # nothing learned to go on: ads (or a pregame show) as likely as the game
+        return not self._pregame(t) and t - max(self.since, self._first_seen) >= self.s.unverified_grace
+
+    def _pregame(self, t: float) -> bool:
+        """Before the scheduled start with no game clock read yet: the pregame show (and its ads),
+        whose studio graphics look like overlays too. Wait for the scorebug - or, for a scorebug
+        that can't be read, the usual grace counted from a minute before the start."""
+        kickoff = self.clock.s.kickoff
+        ends = kickoff - self.s.pregame_ends_before + self.s.unverified_grace
+        return bool(kickoff) and not self.clock.readable and t < ends
 
     def observe(self, frame_bgr: np.ndarray, t: float) -> State:
         if self._first_seen is None:
@@ -312,11 +332,7 @@ class BreakDetector:
 
         # Graphics after a score (scoring drive, stats) keep covering the scorebug for a moment,
         # so "mostly up lately" counts, not just "up without a gap".
-        # Only the scorebug, or two overlays at once, count here: one small region (a team logo) can
-        # match an ad's fine print frame after frame.
-        hits = [sc >= self.s.region_match for sc in self.last_scores]
-        scorebug_up = bool(hits) and (hits[self.model.primary] or sum(hits) >= 2)
-        self._recent_overlays.append((t, scorebug_up))
+        self._recent_overlays.append((t, scorebug_up(self.last_scores, self.model.primary, self.s)))
         while self._recent_overlays and t - self._recent_overlays[0][0] > self.s.overlay_only_return + 2:
             self._recent_overlays.popleft()
         mostly_up = (len(self._recent_overlays) >= 3 and t - self._recent_overlays[0][0] >= self.s.overlay_only_return
@@ -325,6 +341,8 @@ class BreakDetector:
         # are the start of the halftime show.
         confirmed = not self.clock.readable or self.clock.live(t, within=6.0) or (
             present and mostly_up and not self.clock.half_nearly_over())
+        if self._pregame(t):
+            confirmed = self.clock.live(t, within=6.0)  # studio graphics stay up too: only the clock
         if self.state == State.BREAK:
             # A clock reading that picks up where the game was needs no further wait.
             if present and confirmed and (clock_live or t - self._present_since >= self.s.live_after):
@@ -339,7 +357,7 @@ class BreakDetector:
     def _try_networks(self, grey: np.ndarray, t: float) -> bool:
         """Still learning: does this look like a network we already know? Adopt it if so."""
         for name, model in self.networks():
-            if any(sc >= self.s.region_match for sc in model.scores(grey)):
+            if scorebug_up(model.scores(grey), model.primary, self.s):
                 first, n = self._network_hits.get(name, (t, 0))
                 self._network_hits[name] = (first, n + 1)
                 if n + 1 >= self.s.network_hits and t - first >= self.s.network_hits_span:

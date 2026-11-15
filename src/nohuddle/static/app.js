@@ -191,6 +191,8 @@ $('#splitter').addEventListener('dblclick', () => {
 function renderPanel() {
   document.body.classList.toggle('single', state.mode === 'single');
   for (const b of document.querySelectorAll('#mode button')) b.classList.toggle('on', b.dataset.mode === state.mode);
+  $('#max-tiles').hidden = state.mode !== 'multi';
+  if (document.activeElement !== $('#max-tiles')) $('#max-tiles').value = String(state.max_tiles);
   $('#auto').checked = state.auto;
   const pinned = state.games.find((g) => g.id === state.pinned);
   $('#pinned').hidden = !pinned;
@@ -273,6 +275,7 @@ $('#watchlist').addEventListener('dragend', async (e) => {
 });
 
 for (const b of document.querySelectorAll('#mode button')) b.onclick = () => post('/api/auto', { mode: b.dataset.mode });
+$('#max-tiles').onchange = (e) => { post('/api/auto', { max_tiles: +e.target.value }); e.target.blur(); };
 $('#auto').onchange = (e) => post('/api/auto', { auto: e.target.checked });
 $('#unpin').onclick = () => post('/api/pin', { id: null });
 $('#chime').checked = chimeOn();
@@ -280,8 +283,10 @@ $('#chime').onchange = (e) => localStorage.setItem('chime', e.target.checked ? '
 $('#panel-toggle').onclick = () => document.body.classList.toggle('panel-hidden');
 $('#drawer-toggle').onclick = toggleDrawer;
 
-// Your fantasy matchup, refreshed while the drawer is open.
+// Fantasy: a matchup (yours, or any team's) or the started players in the game with sound.
+// Only the tab being looked at is refreshed, every 30s while the drawer is open.
 let fantasyTimer = null;
+const fx = { tab: localStorage.getItem('fx-tab') || 'matchup', team: localStorage.getItem('fx-team') || '' };
 function toggleFantasy() {
   const open = $('#fantasy').hidden;
   $('#fantasy').hidden = !open;
@@ -290,19 +295,37 @@ function toggleFantasy() {
   clearInterval(fantasyTimer);
   if (open) { loadFantasy(); fantasyTimer = setInterval(loadFantasy, 30000); }
 }
+function showFantasyTab(tab, team) {
+  fx.tab = tab;
+  if (team != null) fx.team = String(team);
+  localStorage.setItem('fx-tab', fx.tab);
+  localStorage.setItem('fx-team', fx.team);
+  for (const b of document.querySelectorAll('.fx-tabs button')) b.classList.toggle('on', b.dataset.tab === tab);
+  $('.fx-tabs').classList.toggle('on-screen', tab === 'on-screen');
+  $('#fantasy-body').innerHTML = '<p class="hint">Loading…</p>';
+  loadFantasy();
+}
 const pts = (x) => (x == null ? '–' : x.toFixed(1));
+const fxRow = (p, extra = '') => `
+  <div class="fx-row${p.starter ? '' : ' bench'}${p.mine ? ' mine' : ''}"><span class="slot">${esc(p.slot)}</span>
+    <span class="who">${esc(p.name)}<small>${esc(p.team)}</small>${extra}${p.line ? `<span class="line">${esc(p.line)}</span>` : ''}</span>
+    <span class="p">${pts(p.points)}<small>${pts(p.projected)}</small></span></div>`;
 function fantasyTeam(side) {
-  const rows = (list, bench) => list.map((p) => `
-    <div class="fx-row${bench ? ' bench' : ''}"><span class="slot">${esc(p.slot)}</span>
-      <span class="who">${esc(p.name)}<small>${esc(p.team)}</small>${p.line ? `<span class="line">${esc(p.line)}</span>` : ''}</span>
-      <span class="p">${pts(p.points)}<small>${pts(p.projected)}</small></span></div>`).join('');
-  return `<div class="fx-side"><h4>${esc(side.name)}</h4>${rows(side.players.filter((p) => p.starter))}
-    <h4>Bench</h4>${rows(side.players.filter((p) => !p.starter), true)}</div>`;
+  return `<div class="fx-side"><h4>${esc(side.name)}</h4>${side.players.filter((p) => p.starter).map((p) => fxRow(p)).join('')}
+    <h4>Bench</h4>${side.players.filter((p) => !p.starter).map((p) => fxRow(p)).join('')}</div>`;
 }
 async function loadFantasy() {
-  const d = await (await fetch('/api/fantasy')).json().catch(() => ({ ok: false, error: 'App not reachable.' }));
+  const tab = fx.tab;
+  const url = tab === 'matchup' ? `/api/fantasy?team=${encodeURIComponent(fx.team)}` : '/api/fantasy/on-screen';
+  const d = await (await fetch(url)).json().catch(() => ({ ok: false, error: 'App not reachable.' }));
+  if (tab !== fx.tab) return; // switched tabs while this was loading
   if (!d.ok) { $('#fantasy-body').innerHTML = `<p class="hint">${esc(d.error)}</p>`; return; }
-  $('#fantasy-title').textContent = `Fantasy · Week ${d.week}`;
+  if (d.week) $('#fantasy-title').textContent = `Fantasy · Week ${d.week}`;
+  if (tab === 'on-screen') { renderOnScreen(d); return; }
+  const sel = $('#fx-team');
+  if (document.activeElement !== sel) {
+    sel.innerHTML = d.teams.map((t) => `<option value="${t.id}" ${t.id === d.team_id ? 'selected' : ''}>${esc(t.name)}${t.id === d.my_team_id ? ' (you)' : ''}</option>`).join('');
+  }
   if (!d.me || !d.opp) { $('#fantasy-body').innerHTML = '<p class="hint">No matchup this week.</p>'; return; }
   const line = (s, lead) => `<span class="team${lead ? ' lead' : ''}">${esc(s.name)}</span><span class="pts${lead ? ' lead' : ''}">${pts(s.points)}</span>
     <span class="sub">proj ${pts(s.projected)}${s.win_probability != null ? ` · ${Math.round(s.win_probability * 100)}% to win` : ''}</span><span></span>`;
@@ -310,6 +333,25 @@ async function loadFantasy() {
   $('#fantasy-body').innerHTML = `<div class="fx-score">${line(d.me, meLead)}${line(d.opp, !meLead)}</div>
     ${fantasyTeam(d.me)}${fantasyTeam(d.opp)}<p class="hint">Points · projected. Updates every 30s.</p>`;
 }
+function renderOnScreen(d) {
+  if (!d.game) { $('#fantasy-body').innerHTML = '<p class="hint">No game with sound right now.</p>'; return; }
+  const rows = d.players.map((p) => fxRow(p,
+    ` <button class="go" data-team="${p.fantasy_team_id}" title="Show ${esc(p.fantasy_team)}'s matchup">${esc(p.fantasy_team)} →</button>`)).join('');
+  $('#fantasy-body').innerHTML = `<div class="fx-side"><h4>${esc(d.game)}</h4>
+    ${rows || '<p class="hint">Nobody in your league has a starter in this game.</p>'}</div>
+    <p class="hint">Started players in your league. Updates every 30s.</p>`;
+}
+document.querySelector('.fx-tabs').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-tab]');
+  if (b) showFantasyTab(b.dataset.tab);
+});
+$('#fx-team').onchange = (e) => showFantasyTab('matchup', e.target.value);
+for (const b of document.querySelectorAll('.fx-tabs button')) b.classList.toggle('on', b.dataset.tab === fx.tab);
+$('.fx-tabs').classList.toggle('on-screen', fx.tab === 'on-screen');
+$('#fantasy-body').addEventListener('click', (e) => {
+  const b = e.target.closest('button.go');
+  if (b) showFantasyTab('matchup', b.dataset.team);
+});
 $('#fantasy-toggle').onclick = toggleFantasy;
 $('#espn-open').onclick = () => post('/api/espn-open', {});
 

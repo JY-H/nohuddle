@@ -146,8 +146,8 @@ def test_learning_games_are_hidden_until_confirmed(monkeypatch):
     unreadable = BreakDetector(read_clock=False)
     run(unreadable, broadcast, 0, 30)
     assert not unreadable.showable(30)
-    run(unreadable, broadcast, 30, 50)
-    assert unreadable.showable(50)  # can't confirm it, so after the grace period show it anyway
+    run(unreadable, broadcast, 30, 80)
+    assert unreadable.showable(80)  # can't confirm it, so once its overlays are learned, show it
 
 
 def test_health_lag_and_stall():
@@ -374,6 +374,42 @@ def test_known_network_gives_new_games_a_head_start(tmp_path):
     assert second.network == "NET"
     assert run(second, scene, 8, 30) == State.BREAK  # and it already knows what an ad looks like
 
+
+
+
+def test_unreadable_game_isnt_shown_before_kickoff(monkeypatch):
+    """From reports: two games added during the pregame ads never read a clock, and after the
+    grace period for unreadable scorebugs were shown - still in the ads."""
+    from nohuddle.gameclock import ClockSettings
+    monkeypatch.setattr(gameclock, "read_text", lambda frame: [])
+    det = BreakDetector(clock_settings=ClockSettings(kickoff=1000))
+    run(det, scene, 0, 50)
+    assert det.state == State.LEARNING and not det.showable(50)  # before kickoff: wait for the clock
+    later = BreakDetector(clock_settings=ClockSettings(kickoff=1000))
+    run(later, scene, 900, 1300)
+    assert not later.showable(1300)  # nor after kickoff, with nothing learned: still the ads
+
+def test_pregame_show_isnt_the_game(tmp_path, monkeypatch):
+    """From reports: before kickoff, a studio show's sponsor box matched one corner of the saved
+    CBS overlays, and the game went live with nothing but the pregame show and its ads on."""
+    from nohuddle.detector import DetectorSettings
+    from nohuddle.gameclock import ClockSettings
+    from nohuddle.networks import NetworkLibrary
+
+    settings = DetectorSettings()
+    first = BreakDetector(settings, read_clock=False)
+    run(first, broadcast, 0, 120)
+    library = NetworkLibrary(tmp_path, settings)
+    library.learn(first.model.persistence, "NET")
+    monkeypatch.setattr(gameclock, "read_text", lambda frame: [])
+    det = BreakDetector(settings, ClockSettings(kickoff=1000), networks=library.candidates)
+    # (all before the scheduled start)
+    run(det, logo_only, 0, 300)  # only the small corner overlay: not this network's scorebug
+    assert det.network is None and not det.showable(300)
+    run(det, broadcast, 300, 400)  # studio graphics that persist, before kickoff
+    assert det.state != State.LIVE and not det.showable(400)
+    monkeypatch.setattr(gameclock, "read_text", lambda frame: texts("FALCONS", "1ST 15:00", "CHIEFS"))
+    assert run(det, broadcast, 400, 410) == State.LIVE  # kickoff: the clock reads
 
 def test_library_keeps_different_networks_apart(tmp_path):
     from nohuddle.detector import DetectorSettings
@@ -670,3 +706,10 @@ def test_fantasy_stat_lines():
     assert stat_line(5, {83: 2, 84: 3, 85: 1, 86: 3, 87: 3}) == "FG 2/3, XP 3/3"
     assert stat_line(16, {96: 2, 99: 4, 120: 13}) == "13 PA, 4 sack, 2 FR"
     assert stat_line(2, {}) == ""  # hasn't played yet
+
+
+def test_pro_teams_from_game_titles():
+    from nohuddle.fantasy import pro_teams_in
+    assert pro_teams_in("Detroit Lions vs New England Patriots") == {"DET", "NE"}
+    assert pro_teams_in("San Francisco 49ers vs Washington Commanders") == {"SF", "WSH"}
+    assert pro_teams_in("Ohio State vs Northwestern") == set()

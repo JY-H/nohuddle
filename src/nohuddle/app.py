@@ -22,7 +22,7 @@ from . import scheduler
 from .detector import W, H, BreakDetector, DetectorSettings, State
 from .gameclock import ClockSettings
 from .health import PlaybackHealth
-from .fantasy import Fantasy
+from .fantasy import Fantasy, pro_teams_in
 from .networks import NetworkLibrary
 from .sports import sport_for
 from .streams import Game, StreamSite
@@ -150,6 +150,7 @@ class Controller:
         self.league = league or cfg.get("league", "nfl")
         self.auto = cfg.get("auto", True)
         self.mode = cfg.get("mode", "single")  # "single" or "multi"
+        self.max_tiles = int(cfg.get("max_tiles", 0))  # multiview: at most this many games (0 = all)
         env = _local_env()
         league, team = env.get("ESPN_LEAGUE_ID"), env.get("ESPN_TEAM_ID")
         # Your fantasy matchup for the drawer, read from ESPN's fantasy API with your session.
@@ -188,6 +189,7 @@ class Controller:
     def save(self) -> None:
         cfg = {
             "site": self.site.base_url, "league": self.league, "auto": self.auto, "mode": self.mode,
+            "max_tiles": self.max_tiles,
             # Not the link built from .env (that stays out of settings files).
             "fantasycast_url": None if self.fantasycast_url == self._default_fantasycast else self.fantasycast_url,
             "settings": {"break_after": self.settings.break_after, "live_after": self.settings.live_after},
@@ -493,13 +495,13 @@ class Controller:
             return [self.active]
         showable = self._showable()
         rest = [g for g in self.priority if g != self.active and g in showable]
-        return [self.active] + rest
+        return ([self.active] + rest)[:self.max_tiles or None]
 
     def _state_json(self) -> dict:
         now = time.time()
         return {
             "now": now, "active": self.active, "pinned": self.pinned, "auto": self.auto, "mode": self.mode,
-            "visible": self._visible(),
+            "max_tiles": self.max_tiles, "visible": self._visible(),
             "site": self.site.base_url, "league": self.league, "events": self.events,
             "fantasycast_url": self.fantasycast_url,
             "settings": {"break_after": self.settings.break_after, "live_after": self.settings.live_after},
@@ -540,6 +542,7 @@ class Controller:
         r.add_post("/api/report", self._api_report)
         r.add_post("/api/espn-open", self._api_espn_open)
         r.add_get("/api/fantasy", self._api_fantasy)
+        r.add_get("/api/fantasy/on-screen", self._api_fantasy_on_screen)
         return app
 
     async def _api_games(self, req: web.Request) -> web.Response:
@@ -596,6 +599,8 @@ class Controller:
             self.auto = bool(body["auto"])
         if body.get("mode") in ("single", "multi"):
             self.mode = body["mode"]
+        if body.get("max_tiles") in (0, 2, 3, 4):
+            self.max_tiles = body["max_tiles"]
         self.save()
         return web.json_response({"ok": True})
 
@@ -638,11 +643,26 @@ class Controller:
     async def _api_fantasy(self, req: web.Request) -> web.Response:
         if self.fantasy is None:
             return web.json_response({"ok": False, "error": "Fantasy isn't set up for this checkout."})
+        team = req.query.get("team", "")
         try:
-            return web.json_response({"ok": True, **await self.fantasy.matchup()})
+            return web.json_response({"ok": True, **await self.fantasy.matchup(int(team) if team.isdigit() else None)})
         except Exception as e:
             log.warning("Fantasy: couldn't load the matchup: %s", type(e).__name__)
-            return web.json_response({"ok": False, "error": "Couldn't load your matchup from ESPN right now."})
+            return web.json_response({"ok": False, "error": "Couldn't load the matchup from ESPN right now."})
+
+    async def _api_fantasy_on_screen(self, req: web.Request) -> web.Response:
+        """Started fantasy players (every team in the league) in the game with sound."""
+        if self.fantasy is None:
+            return web.json_response({"ok": False, "error": "Fantasy isn't set up for this checkout."})
+        w = self.watched.get(self.active) if self.active else None
+        teams = pro_teams_in(w.game.title) if w else set()
+        if not teams:
+            return web.json_response({"ok": True, "game": w.game.title if w else None, "players": []})
+        try:
+            return web.json_response({"ok": True, "game": w.game.title, **await self.fantasy.started_in(teams)})
+        except Exception as e:
+            log.warning("Fantasy: couldn't load the league's players: %s", type(e).__name__)
+            return web.json_response({"ok": False, "error": "Couldn't load fantasy players from ESPN right now."})
 
     async def _api_espn_open(self, req: web.Request) -> web.Response:
         """Open ESPN's own Fantasycast in a normal tab (popups are otherwise closed)."""

@@ -112,6 +112,13 @@ body.resizing #stage iframe { transition: none; }
 #fantasy header { padding: 8px 10px; border-bottom: 1px solid var(--line); }
 #fantasy header b { flex: 1; }
 #fantasy-body { padding: 8px 10px; }
+.fx-tabs { display: flex; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--line); align-items: center; }
+.fx-tabs button { font-size: 12px; padding: 2px 8px; }
+.fx-tabs button.on { border-color: var(--accent); color: var(--accent); }
+.fx-tabs select { margin-left: auto; max-width: 150px; font-size: 12px; }
+.fx-tabs.on-screen select { display: none; }
+.fx-row .go { font-size: 11px; padding: 0 5px; margin-left: 4px; }
+.fx-row.mine .who { color: var(--accent); }
 .fx-score { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: baseline; padding: 6px 0 10px; border-bottom: 1px solid var(--line); }
 .fx-score .team { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fx-score .pts { font-size: 22px; font-weight: 700; text-align: right; }
