@@ -218,6 +218,9 @@ function renderPanel() {
       </li>`).join('');
   }
   $('#watch-empty').hidden = state.games.length > 0;
+  // Keep the game list's "added" marks in step with the watchlist (e.g. after removing a game).
+  const watchedKey = state.games.map((g) => g.id).sort().join('|');
+  if (watchedKey !== lastWatchedKey) { lastWatchedKey = watchedKey; if (gameList.length) renderGames(); }
 
   if (document.activeElement?.closest('details') == null) {
     $('#break_after').value = state.settings.break_after;
@@ -369,6 +372,7 @@ $('#save-settings').onclick = () => post('/api/settings', {
 // ---------- game list ----------
 
 let gameList = [];
+let lastWatchedKey = null;
 async function loadGames() {
   const league = $('#league').value;
   $('#games').innerHTML = '<li class="hint">Loading…</li>';
