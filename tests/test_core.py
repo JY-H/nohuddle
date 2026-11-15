@@ -208,6 +208,17 @@ def test_parse_scorebug_text():
     assert far.quarter == 3 and far.clock is None  # clock on the other side of the screen
 
 
+
+def test_down_and_distance_misreads_are_not_the_quarter():
+    """From a report: "1ST $ 10" ("&" read as "$") and a stray "1ST" were taken for the 1st quarter
+    next to "7:21 4TH", so the return from a break waited for a cleaner reading and missed a snap."""
+    def at(*items):
+        return [Text(s, x, 0.9) for s, x in items]
+    r = parse(at(("10", 0.2), ("1ST $ 10", 0.4), ("7:21", 0.33), ("4TH", 0.33), ("35", 0.45), ("FOX NFL", 0.9)))
+    assert (r.quarter, r.clock) == (4, 441)
+    r = parse(at(("< 1ST", 0.2), ("10", 0.25), ("7:21", 0.33), ("4TH", 0.34), ("1ST & 10", 0.4), ("35", 0.45)))
+    assert (r.quarter, r.clock) == (4, 441)
+
 def reading(q, clock, words=("DUKE", "MIAMI")):
     return Reading(q, clock, words=set(words))
 
@@ -575,6 +586,19 @@ def test_one_small_overlay_lookalike_in_an_ad_doesnt_end_the_break(monkeypatch):
     assert run(det, scene, 150, 170) == State.BREAK
     assert run(det, logo_only, 170, 200) == State.BREAK  # one overlay, no clock: not enough
     assert run(det, broadcast, 200, 210) == State.LIVE  # the whole scorebug is
+
+
+def test_back_from_a_break_the_moment_the_clock_reads(monkeypatch):
+    """From a report: back from a break, the scorebug was up ~5s before the game was shown, and
+    the snap was missed. A clock reading picking up where the game was is enough on its own."""
+    monkeypatch.setattr(gameclock, "read_text", lambda frame: texts("LIONS", "4TH 3:20", "PATRIOTS"))
+    det = BreakDetector(read_clock=True)
+    run(det, broadcast, 0, 150)
+    blank = lambda frame: []
+    monkeypatch.setattr(gameclock, "read_text", blank)
+    assert run(det, scene, 150, 200) == State.BREAK
+    monkeypatch.setattr(gameclock, "read_text", lambda frame: texts("LIONS", "4TH 2:49", "2ND S 4", "PATRIOTS"))
+    assert det.observe(broadcast(200), 200.0) == State.LIVE  # first frame with the scorebug: back
 
 def test_long_break_mid_second_quarter_is_not_halftime():
     """From a report: a 5+ minute break at Q2 8:25 was taken for halftime."""

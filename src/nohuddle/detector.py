@@ -69,6 +69,7 @@ class DetectorSettings:
     recent_fit_frames: int = 30  # when nothing's been learned yet, fit on just the last ~2 minutes
     read_clock_every: float = 2.0  # seconds between scorebug clock reads (OCR)
     read_clock_every_idle: float = 6.0  # ...when no overlay is showing
+    read_clock_every_return: float = 1.0  # ...on a break with overlays showing again: every frame
     clock_disagree_relearn: float = 20.0  # clock says live but no overlays for this long -> relearn
     stuck_break_relearn: float = 480.0  # "break" (not halftime) this long -> relearn
     long_break_halftime: float = 300.0  # a break this long right after the 2nd quarter = halftime
@@ -230,6 +231,8 @@ class BreakDetector:
         # learning (the clock is then what decides whether the game is shown).
         busy = any_overlay or not learned or self.clock.live(t, within=15.0)
         every = self.s.read_clock_every if busy else self.s.read_clock_every_idle
+        if self.state == State.BREAK and any_overlay:
+            every = self.s.read_clock_every_return  # something's back: catch the clock the moment it is
         if self.read_clock and t - self._last_read >= every:
             self._last_read = t
             texts = gameclock.read_text(frame_bgr)
@@ -323,7 +326,8 @@ class BreakDetector:
         confirmed = not self.clock.readable or self.clock.live(t, within=6.0) or (
             present and mostly_up and not self.clock.half_nearly_over())
         if self.state == State.BREAK:
-            if present and t - self._present_since >= self.s.live_after and confirmed:
+            # A clock reading that picks up where the game was needs no further wait.
+            if present and confirmed and (clock_live or t - self._present_since >= self.s.live_after):
                 return self._set(State.LIVE, t)
             return self.state
         if not present and t - self._absent_since >= self.s.break_after:

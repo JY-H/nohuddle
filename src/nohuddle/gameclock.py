@@ -31,7 +31,7 @@ CLOCK_RE = re.compile(r"(?<![\d:.])(\d{1,2})[:.;](\d{2})(?![:.]\d)(?!\s*[AP]\.?M
 SUBMINUTE_AFTER_QUARTER_RE = re.compile(r"[^\d:]{0,3}[:;](\d{2})(?![\d:.])")
 OT_RE = re.compile(r"(?<![A-Z])(\d?OT)(?![A-Z])")
 # "2ND & 10", "2ND DOWN", "1ST HALF" - and "2nd.84", which is "2nd & 4" with the & read as an 8.
-NOT_A_QUARTER_AFTER = re.compile(r"[\s.,:;]*(&|AND\b|DOWNS?\b|HALF\b|TEAM\b|8\s*\d{1,2}\b(?![:.]))")
+NOT_A_QUARTER_AFTER = re.compile(r"[\s.,:;]*([&$]|AND\b|DOWNS?\b|HALF\b|TEAM\b|[8S]\s*\d{1,2}\b(?![:.]))")
 # Team-stat panels (halftime, end of quarter) are full of things that look like a scorebug:
 # "3rd DOWNS" reads as a quarter and time of possession ("14:56") as a game clock.
 STAT_PANEL_RE = re.compile(r"TOTAL\s*YAR|TURNOVERS|POSSESSION|TIME OF POS|\bT\.?O\.?P\b|(?:1ST|3RD|4TH|FIRST|THIRD|FOURTH)\s*DOWNS|PENALTIES|RUSHING\s*YARDS|PASSING\s*YARDS|\bSACKS\b|TACKLES")  # "2ND & 10", "2ND DOWN", "1ST HALF"
@@ -93,7 +93,7 @@ def _quarter_in(s: str) -> int | None:
 LOOKALIKES = str.maketrans("тТоОрРнНаАеЕсСвВмМкКхХуУ", "TTOOPPHHAAEECCBBMMKKXXYY")
 # Down and distance ("1ST & 10"), including OCR's "1ST 8.10" (& read as 8). Only treated as such
 # when a real clock is elsewhere on screen, since "2ND 8.47" can also be a misread clock.
-DOWN_DISTANCE_RE = re.compile(r"(?<!\d)[1-4]\s*(?:ST|ND|RD|TH|S[T7]|N[D0O]|R[D0O])\W{0,2}(?:&|8)\W{0,2}(?:\d{1,2}|GOAL|GL)\b")
+DOWN_DISTANCE_RE = re.compile(r"(?<!\d)[1-4]\s*(?:ST|ND|RD|TH|S[T7]|N[D0O]|R[D0O])\W{0,2}(?:&|8|\$|S(?=\W))\W{0,2}(?:\d{1,2}|GOAL|GL)\b")  # "&" is often read as "8", "$", "S"
 
 
 def _drop_down_and_distance(texts: list[Text]) -> list[Text]:
@@ -112,7 +112,9 @@ PREVIEW_RE = re.compile(r"COMING\s*UP|UP\s*NEXT|STILL\s*TO\s*COME|AHEAD\s*ON")
 def parse(texts: list[Text]) -> Reading:
     """Turn recognised text into a reading. Pairs the quarter with the clock next to it."""
     r = Reading()
-    texts = _drop_down_and_distance([Text(t.s.translate(LOOKALIKES).upper(), t.x, t.y) for t in texts])
+    texts = [Text(t.s.translate(LOOKALIKES).upper(), t.x, t.y) for t in texts]
+    downs = {int(m.group(0)[0]) for t in texts for m in DOWN_DISTANCE_RE.finditer(t.s)}
+    texts = _drop_down_and_distance(texts)
     if len({m.group(0)[:5] for m in STAT_PANEL_RE.finditer(" | ".join(t.s for t in texts))}) >= 2:
         r.halftime = any("HALFTIME" in t.s for t in texts) and not PREVIEW_RE.search(" | ".join(t.s for t in texts))
         return r  # a stats panel: nothing on it is the game clock
@@ -159,6 +161,10 @@ def parse(texts: list[Text]) -> Reading:
                 clocks.append((nb, int(m.group(1))))
                 break
     if quarters:
+        if len(quarters) > 1:
+            # Several things read as a quarter: a stray "1ST" split off the "1ST & 10" on screen is
+            # the down, not the quarter.
+            quarters.sort(key=lambda q: q[1] in downs)
         qt, r.quarter = quarters[0]
         if clocks:
             # Prefer a clock in the same text as the quarter ("2ND 5:47"), else the nearest one.
