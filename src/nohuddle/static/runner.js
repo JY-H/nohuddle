@@ -79,26 +79,74 @@ const Runner = (() => {
     ctx.fillRect(0, GROUND, W, 2);
   }
 
+  const JERSEY = '#2f6fe0', TRIM = '#1b3f8a', PANTS = '#e9c46a', SKIN = '#c68a5a', MASK = '#d8dde6';
+
+  function segment(x1, y1, x2, y2, width, color) {
+    ctx.strokeStyle = color; ctx.lineWidth = width;
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  }
+
+  // A two-part limb hanging from (x, y): `a` swings it forward from straight down, `bend` folds the
+  // lower half back. Returns where it ends.
+  function limb(x, y, a, bend, len, upper, lower, width) {
+    const kx = x + Math.sin(a) * len, ky = y + Math.cos(a) * len;
+    const ex = kx + Math.sin(a - bend) * len, ey = ky + Math.cos(a - bend) * len;
+    segment(x, y, kx, ky, width, upper);
+    segment(kx, ky, ex, ey, width - 1, lower);
+    return [ex, ey];
+  }
+
+  function leg(a, bend) {
+    const [fx, fy] = limb(12, -17, a, Math.min(bend, a + 0.7), 8.5, PANTS, JERSEY, 6);
+    ctx.fillStyle = '#111';  // cleat
+    ctx.beginPath(); ctx.ellipse(fx + 2, fy + 0.5, 4, 2, 0, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // A side-on football player facing right, ball tucked under the front arm.
   function drawPlayer() {
-    const { x, y } = player, duck = player.ducking && y >= GROUND;
-    const leg = Math.sin(player.stride / 9) * (y < GROUND ? 0 : 6);
+    const { x, y } = player, duck = player.ducking && y >= GROUND, air = y < GROUND;
+    const p = player.stride / 9, swing = Math.sin(p);
     ctx.save();
     ctx.translate(x, y);
-    if (duck) ctx.scale(1.2, 0.6);
-    ctx.fillStyle = '#e7e9ee';  // pants and legs
-    ctx.fillRect(6, -14, 5, 14 + Math.min(0, leg));
-    ctx.fillRect(14, -14, 5, 14 - Math.max(0, leg));
-    ctx.fillStyle = '#4c8dff';  // jersey
-    ctx.fillRect(4, -32, 18, 18);
+    if (duck) ctx.scale(1.25, 0.55);
+    ctx.lineCap = 'round';
+    // Far leg and arm first, so the near ones overlap them.
+    if (air) leg(-0.5, 0.2); else leg(-swing * 0.6, 0.15 + 0.9 * Math.max(0, Math.cos(p)));
+    limb(12, -31, air ? -0.9 : swing * 0.9, -0.6, 6, JERSEY, SKIN, 4);
+    if (air) leg(0.9, 1.3); else leg(swing * 0.6, 0.15 + 0.9 * Math.max(0, -Math.cos(p)));
+    // Jersey: leaning into the run, wider up top for the shoulder pads.
+    ctx.fillStyle = JERSEY;
+    ctx.beginPath();
+    ctx.moveTo(7, -16); ctx.lineTo(17, -16); ctx.lineTo(26, -29);
+    ctx.quadraticCurveTo(27, -35, 20, -35); ctx.lineTo(12, -35);
+    ctx.quadraticCurveTo(6, -35, 6, -29); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = TRIM;
+    ctx.fillRect(7, -18, 11, 2);  // belt
     ctx.fillStyle = '#fff';
-    ctx.font = 'bold 10px system-ui';
-    ctx.fillText('7', 10, -19);
-    ctx.fillStyle = '#c9d1dc';  // helmet and facemask
-    ctx.beginPath(); ctx.arc(14, -38, 8, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#4c8dff';
-    ctx.fillRect(10, -46, 3, 16);
-    ctx.strokeStyle = '#555'; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.moveTo(20, -40); ctx.lineTo(24, -40); ctx.moveTo(20, -36); ctx.lineTo(24, -36); ctx.stroke();
+    ctx.font = 'bold 11px system-ui';
+    ctx.fillText('7', 10, -20);
+    // Near arm, ball in the crook of the elbow.
+    limb(20, -31, 0.25, -1.9, 6, JERSEY, SKIN, 4.5);
+    ctx.save();
+    ctx.translate(25, -25); ctx.rotate(-0.5);
+    ctx.fillStyle = '#7a3e1a';
+    ctx.beginPath(); ctx.ellipse(0, 0, 5, 3, 0, 0, Math.PI * 2); ctx.fill();
+    segment(-2, -0.5, 2, -0.5, 1, '#fff');
+    ctx.restore();
+    // Helmet: shell with a center stripe, ear hole, and a cage over the face.
+    ctx.fillStyle = JERSEY;
+    ctx.beginPath(); ctx.arc(20, -41, 7.5, Math.PI * 0.85, Math.PI * 2.25); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(20, -41, 7.5, Math.PI * 1.15, Math.PI * 1.75); ctx.stroke();
+    ctx.fillStyle = TRIM;
+    ctx.beginPath(); ctx.arc(18.5, -40, 1.5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = SKIN;
+    ctx.fillRect(24, -42, 3, 5);
+    ctx.lineCap = 'butt';
+    segment(24, -43, 29, -43, 1.2, MASK);
+    segment(24, -39.5, 29.5, -39.5, 1.2, MASK);
+    segment(29, -44, 29, -36, 1.2, MASK);
+    segment(24, -36, 29, -36, 1.2, MASK);
     ctx.restore();
   }
 
