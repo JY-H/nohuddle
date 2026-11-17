@@ -26,10 +26,10 @@ const Runner = (() => {
   function spawn() {
     const score = distance / 10;
     if (score > 300 && Math.random() < 0.3) {
-      // A football in flight: a low one you jump; one at head height you jump or duck; a high one
+      // A football in flight: a low one you jump; one at head height you duck (or jump); a high one
       // sails over your head but sits where a jump would take you (too high to clear), so the only
       // way past is to keep your feet down.
-      const lift = [20, 34, 100, 100][Math.floor(Math.random() * 4)];
+      const lift = [20, 41, 100, 100][Math.floor(Math.random() * 4)];
       obstacles.push({ kind: 'ball', x: W + 20, y: GROUND - lift, w: 26, h: 14 });
     } else {
       const tall = Math.random() < 0.35, pair = score > 150 && Math.random() < 0.3;
