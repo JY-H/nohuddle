@@ -310,13 +310,15 @@ function showFantasyTab(tab, team) {
   loadFantasy();
 }
 const pts = (x) => (x == null ? '–' : x.toFixed(1));
-const fxRow = (p, extra = '') => `
-  <div class="fx-row${p.starter ? '' : ' bench'}${p.mine ? ' mine' : ''}"><span class="slot">${esc(p.slot)}</span>
+const fxRow = (p, extra = '', playing = false) => `
+  <div class="fx-row${p.starter ? '' : ' bench'}${p.mine ? ' mine' : ''}${playing ? ' playing' : ''}"><span class="slot">${esc(p.slot)}</span>
     <span class="who">${esc(p.name)}<small>${esc(p.team)}</small>${extra}${p.line ? `<span class="line">${esc(p.line)}</span>` : ''}</span>
     <span class="p">${pts(p.points)}<small>${pts(p.projected)}</small></span></div>`;
-function fantasyTeam(side) {
-  return `<div class="fx-side"><h4>${esc(side.name)}</h4>${side.players.filter((p) => p.starter).map((p) => fxRow(p)).join('')}
-    <h4>Bench</h4>${side.players.filter((p) => !p.starter).map((p) => fxRow(p)).join('')}</div>`;
+// Players in the game being shown are highlighted.
+function fantasyTeam(side, onScreen) {
+  const row = (p) => fxRow(p, '', onScreen.has(p.team));
+  return `<div class="fx-side"><h4>${esc(side.name)}</h4>${side.players.filter((p) => p.starter).map(row).join('')}
+    <h4>Bench</h4>${side.players.filter((p) => !p.starter).map(row).join('')}</div>`;
 }
 async function loadFantasy() {
   const tab = fx.tab;
@@ -333,9 +335,10 @@ async function loadFantasy() {
   if (!d.me || !d.opp) { $('#fantasy-body').innerHTML = '<p class="hint">No matchup this week.</p>'; return; }
   const line = (s, lead) => `<span class="team${lead ? ' lead' : ''}">${esc(s.name)}</span><span class="pts${lead ? ' lead' : ''}">${pts(s.points)}</span>
     <span class="sub">proj ${pts(s.projected)}${s.win_probability != null ? ` · ${Math.round(s.win_probability * 100)}% to win` : ''}</span><span></span>`;
-  const meLead = d.me.points >= d.opp.points;
+  const meLead = d.me.points >= d.opp.points, onScreen = new Set(d.on_screen || []);
   $('#fantasy-body').innerHTML = `<div class="fx-score">${line(d.me, meLead)}${line(d.opp, !meLead)}</div>
-    ${fantasyTeam(d.me)}${fantasyTeam(d.opp)}<p class="hint">Points · projected. Updates every 30s.</p>`;
+    ${fantasyTeam(d.me, onScreen)}${fantasyTeam(d.opp, onScreen)}
+    <p class="hint">Points · projected.${onScreen.size ? ` <span class="playing-key">Highlighted</span>: in ${[...onScreen].join('–')}.` : ''} Updates every 30s.</p>`;
 }
 function renderOnScreen(d) {
   if (!d.game) { $('#fantasy-body').innerHTML = '<p class="hint">No game with sound right now.</p>'; return; }

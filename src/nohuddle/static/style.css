@@ -137,4 +137,7 @@ body.resizing #stage iframe { transition: none; }
 .fx-row .p { text-align: right; font-variant-numeric: tabular-nums; }
 .fx-row .p small { color: var(--muted); margin-left: 4px; }
 .fx-row.bench { opacity: .55; }
+.fx-row.playing { background: rgba(76, 141, 255, .14); box-shadow: inset 3px 0 0 var(--accent); padding-left: 5px; }
+.fx-row.bench.playing { opacity: .8; }
+.playing-key { color: var(--accent); }
 .fx-row .who .line { display: block; color: var(--muted); font-size: 11px; margin-top: 1px; }

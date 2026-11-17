@@ -654,12 +654,19 @@ class Controller:
         self.save()
         return web.json_response({"ok": True})
 
+    def _shown_game(self) -> Watched | None:
+        """The game the fantasy drawer is about: the one with sound, else the most preferred."""
+        gid = self.active if self.active in self.watched else next(iter(self.priority), None)
+        return self.watched.get(gid) if gid else None
+
     async def _api_fantasy(self, req: web.Request) -> web.Response:
         if self.fantasy is None:
             return web.json_response({"ok": False, "error": "Fantasy isn't set up for this checkout."})
         team = req.query.get("team", "")
+        w = self._shown_game()
         try:
-            return web.json_response({"ok": True, **await self.fantasy.matchup(int(team) if team.isdigit() else None)})
+            return web.json_response({"ok": True, **await self.fantasy.matchup(int(team) if team.isdigit() else None),
+                                      "on_screen": pro_teams_in(w.game.title) if w else []})
         except Exception as e:
             log.warning("Fantasy: couldn't load the matchup: %s", type(e).__name__)
             return web.json_response({"ok": False, "error": "Couldn't load the matchup from ESPN right now."})
@@ -669,8 +676,7 @@ class Controller:
         - or, with every game on a break, the most preferred one."""
         if self.fantasy is None:
             return web.json_response({"ok": False, "error": "Fantasy isn't set up for this checkout."})
-        gid = self.active if self.active in self.watched else next(iter(self.priority), None)
-        w = self.watched.get(gid) if gid else None
+        w = self._shown_game()
         teams = pro_teams_in(w.game.title) if w else []
         if not teams:
             return web.json_response({"ok": True, "game": w.game.title if w else None, "teams": []})

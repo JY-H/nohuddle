@@ -1,5 +1,6 @@
 // A little endless runner for when every game is on a break: a football player running down the
-// field, hurdling tackling dummies and ducking under footballs. Space / ↑ to jump, ↓ to duck.
+// field, hurdling tackling dummies and footballs,
+// and staying grounded under the high ones. Space / ↑ to jump, ↓ to duck.
 const Runner = (() => {
   const W = 720, H = 200, GROUND = 168;
   const GRAVITY = 0.0028, JUMP = -0.78, FAST_FALL = 0.012;  // px/ms² and px/ms
@@ -25,9 +26,11 @@ const Runner = (() => {
   function spawn() {
     const score = distance / 10;
     if (score > 300 && Math.random() < 0.3) {
-      // A football in flight: high ones you duck, low ones you jump.
-      const high = Math.random() < 0.6;
-      obstacles.push({ kind: 'ball', x: W + 20, y: high ? GROUND - 46 : GROUND - 20, w: 26, h: 14 });
+      // A football in flight: a low one you jump; one at head height you jump or duck; a high one
+      // sails over your head but sits where a jump would take you (too high to clear), so the only
+      // way past is to keep your feet down.
+      const lift = [20, 34, 100, 100][Math.floor(Math.random() * 4)];
+      obstacles.push({ kind: 'ball', x: W + 20, y: GROUND - lift, w: 26, h: 14 });
     } else {
       const tall = Math.random() < 0.35, pair = score > 150 && Math.random() < 0.3;
       for (let i = 0; i < (pair ? 2 : 1); i++) {
