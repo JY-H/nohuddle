@@ -21,7 +21,7 @@ Needs [uv](https://docs.astral.sh/uv/) and Google Chrome (the app drives your in
 - 👁 shows what the detector sees (green = overlay visible, red = learned but not visible).
 - Keys: `S` panel, `M` single/multi, `F` fullscreen.
 
-Settings, the watchlist, learned overlays, the network library, saved reports and the app's Chrome profile live in `data/` in the checkout (gitignored; it holds your stream site and broadcast frames, so keep it out of git). Set `NOHUDDLE_DATA` to use another folder; installed elsewhere, the default is `~/.config/nohuddle/`.
+Settings, the watchlist, learned overlays, the learned network library, saved reports and the app's Chrome profile live in `data/` in the checkout (gitignored; it holds your stream site and broadcast frames, so keep it out of git). Set `NOHUDDLE_DATA` to use another folder; installed elsewhere, the default is `~/.config/nohuddle/`.
 
 ## How break detection works
 
@@ -30,10 +30,16 @@ Live broadcasts have graphics composited over the picture: the scorebug, the net
 1. Every 4s a frame goes into a ~10 minute history (break frames excluded, so long ad breaks can't wash the model out).
 2. Pixels that are an **edge in ≥70% of frames** are overlay outlines — even translucent logos keep their edges, while moving scenery doesn't.
 3. Those pixels are grouped into regions; each frame, each region's edge pattern is **correlated** with the current edges (busy ad scenes don't correlate with a logo's shape).
-4. **Any** region matching = broadcast. All gone (scorebug *and* logo) for 4s = **break**; back for 2s = **live**.
+4. **Any** region matching = broadcast. All gone (scorebug *and* logo) for 3s = **break**; back for 2s = **live**.
 5. The largest region is the scorebug. If only the logo has been there for 2+ minutes, it's an **intermission** (halftime show) and counts as a break. Minutes with no overlays at all also count as a break.
 
 Learned overlays are saved per game and source, so restarting mid-game (or mid-halftime) doesn't start from scratch.
+
+### Network library
+
+Every game on a network shares its logo and scorebug frame, so NFL games also feed a library of network looks (`networks.py`). A new game is checked against each known look and, once one shows up steadily, starts from it instead of a minute of learning. A game's proven model is folded back into the look it matches, averaging away what's specific to one game (team logos, scores), or starts a new one, named after the network read off the screen. A network can have more than one look ("FOX (2)": the same graphics as another stream source frames them); they're all shown under the network's name.
+
+A fresh install starts with the well-established looks shipped in `src/nohuddle/seed_networks/nfl/` (CBS, FOX, ESPN MNF, the NFL's world feed, Prime Video). What it learns goes to `data/networks/nfl/`, which overrides a seed of the same name. To refresh the seeds, copy entries that have proven themselves over many games from `data/networks/nfl/` (each is a `.json` name and count plus an `.npy` edge map, nothing else).
 
 ### Per-sport behaviour
 

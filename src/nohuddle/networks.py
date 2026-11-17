@@ -9,6 +9,9 @@ overlays learned from one game make a good starting point for the next:
 - When a game's own model has proven itself, it's folded back into its network's entry (or starts
   a new entry). Averaging across games keeps what's common to the network - logo, scorebug frame -
   and fades what's specific to one game, like team names.
+
+The package ships a few well-established entries (seed_networks/) so a fresh install knows the
+main networks from its first game. What's learned locally overrides a seed of the same name.
 """
 
 import json
@@ -49,12 +52,14 @@ class NetworkLibrary:
     edge_threshold = 0.5
     max_weight = 20  # older games' share of the average stops growing past this many
 
-    def __init__(self, folder: Path, settings: DetectorSettings):
-        self.folder = folder
+    def __init__(self, folder: Path, settings: DetectorSettings, seeds: Path | None = None):
+        self.folder = folder  # where learning is saved
         self.s = settings
         self.networks: dict[str, Network] = {}
-        if folder.exists():
-            for meta_path in folder.glob("*.json"):
+        for source in (seeds, folder):  # local entries load last, replacing seeds of the same name
+            if source is None or not source.exists():
+                continue
+            for meta_path in source.glob("*.json"):
                 try:
                     meta = json.loads(meta_path.read_text())
                     persistence = np.load(meta_path.with_suffix(".npy")).astype(np.float32)

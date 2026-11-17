@@ -17,6 +17,7 @@ has been gone for `break_after` seconds, so short full-screen graphics don't tri
 while the return to live (`live_after`) is fast so you don't miss the snap.
 """
 
+import re
 from collections import Counter, deque
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -159,6 +160,12 @@ class OverlayModel:
         return [(int(c.start), int(r.start), int(c.stop - c.start), int(r.stop - r.start)) for r, c, _ in self.regions]
 
 
+def network_name(look: str | None) -> str | None:
+    """A network's name without the number that tells its looks apart: "FOX (2)" is FOX's graphics
+    as one stream source frames them (see networks.py)."""
+    return re.sub(r"\s*\(\d+\)$", "", look) if look else look
+
+
 def scorebug_up(scores: list[float], primary: int, s: DetectorSettings) -> bool:
     """The scorebug, or two overlays at once: one small region (a team logo, a corner bug) alone
     can match an ad's fine print or a studio show's sidebar frame after frame."""
@@ -225,7 +232,7 @@ class BreakDetector:
         """Which network this is: the one whose name keeps being read off the screen, else the
         one whose overlays it matched."""
         top = self.network_votes.most_common(1)
-        return top[0][0] if top and top[0][1] >= self.s.network_name_votes else self.network
+        return top[0][0] if top and top[0][1] >= self.s.network_name_votes else network_name(self.network)
 
     def fading(self, t: float) -> bool:
         """Still live, but nothing from the game has been on screen for a moment: probably the

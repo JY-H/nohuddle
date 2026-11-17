@@ -19,7 +19,7 @@ from aiohttp import web
 from playwright.async_api import BrowserContext, Frame, Page, Route, async_playwright
 
 from . import scheduler
-from .detector import W, H, BreakDetector, DetectorSettings, State
+from .detector import W, H, BreakDetector, DetectorSettings, State, network_name
 from .gameclock import ClockSettings
 from .health import PlaybackHealth
 from .fantasy import Fantasy, pro_teams_in
@@ -169,7 +169,8 @@ class Controller:
             break_after=s.get("break_after", DetectorSettings.break_after),
             live_after=s.get("live_after", DetectorSettings.live_after),
         )
-        self.library = NetworkLibrary(CONFIG_DIR / "networks" / "nfl", self.settings)
+        self.library = NetworkLibrary(CONFIG_DIR / "networks" / "nfl", self.settings,
+                                      seeds=Path(__file__).parent / "seed_networks" / "nfl")
         self.watched: dict[str, Watched] = {}
         self.priority: list[str] = []
         for g in cfg.get("watchlist", []):
@@ -261,7 +262,7 @@ class Controller:
             hint = top[0][0] if top and top[0][1] >= d.s.network_name_votes else None
             d.network = self.library.learn(d.model.persistence, hint)
             w.network_learned_at = time.time()
-            log.info("%s looks like %s", w.game.title, d.network)
+            log.info("%s looks like %s", w.game.title, network_name(d.network))
 
     # ---------- browser ----------
 
@@ -525,7 +526,7 @@ class Controller:
                     "state": self.watched[g].detector.state, "since": self.watched[g].detector.since,
                     "detail": self.watched[g].detector.detail,
                     "clock": self.watched[g].detector.clock.display,
-                    "network": self.watched[g].detector.network,
+                    "network": network_name(self.watched[g].detector.network),
                     "overridden": self.watched[g].detector.override is not None,
                     "embed_index": self.watched[g].embed_index, "embed_url": self.watched[g].embed_url,
                     "nonce": self.watched[g].nonce, "laggy": self.watched[g].laggy,
@@ -698,7 +699,7 @@ class Controller:
 
     def _debug_info(self, w: Watched) -> dict:
         c = w.detector.clock
-        return {"id": w.game.id, "title": w.game.title, "network": w.detector.network,
+        return {"id": w.game.id, "title": w.game.title, "network": network_name(w.detector.network), "look": w.detector.network,
                 "network_votes": dict(w.detector.network_votes),
                 "state": w.detector.state, "detail": w.detector.detail,
                 "since": w.detector.since, "clock_display": c.display, "clock": c.to_json(), "teams": c.teams,

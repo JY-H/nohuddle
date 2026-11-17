@@ -889,3 +889,32 @@ def test_espn_mnf_logo_votes_espn():
     votes = gameclock.network_votes(["ESPTMNF", "17", "WEEK 11"])
     assert votes["ESPN"] == 1
     assert gameclock.network_votes(["E5FTMNF"])["ESPN"] == 1 and gameclock.network_votes(["ESFTMNE"])["ESPN"] == 1
+
+
+def test_seed_networks_load_under_local_learning(tmp_path):
+    from pathlib import Path
+
+    from nohuddle.detector import DetectorSettings
+    from nohuddle.networks import NetworkLibrary
+
+    settings = DetectorSettings()
+    seeds = Path(__file__).parent.parent / "src" / "nohuddle" / "seed_networks" / "nfl"
+    fresh = NetworkLibrary(tmp_path / "data", settings, seeds=seeds)  # a new install
+    assert {"CBS", "FOX", "ESPN MNF", "NFL Broadcast"} <= set(fresh.networks)
+    assert all(n.model.regions for n in fresh.networks.values())  # each one usable as a candidate
+    # Learning onto a seed saves locally, and the local copy wins from then on; seeds stay put.
+    seed_cbs = fresh.networks["CBS"]
+    assert fresh.learn(seed_cbs.persistence, "CBS") == "CBS"
+    assert (tmp_path / "data" / "cbs.json").exists()
+    again = NetworkLibrary(tmp_path / "data", settings, seeds=seeds)
+    assert again.networks["CBS"].games == seed_cbs.games + 1
+    assert '"games": %d' % seed_cbs.games in (seeds / "cbs.json").read_text()
+
+
+def test_a_networks_other_looks_go_by_its_name():
+    from nohuddle.detector import network_name
+
+    assert network_name("FOX (2)") == "FOX" and network_name("ESPN MNF") == "ESPN MNF" and network_name(None) is None
+    d = BreakDetector(read_clock=False)
+    d.network = "NFL Broadcast (2)"  # the world feed as another stream source frames it
+    assert d.feed() == "NFL Broadcast"  # still gets the world feed's rules
