@@ -844,3 +844,48 @@ def test_pro_teams_from_game_titles():
     assert pro_teams_in("Detroit Lions vs New England Patriots") == ["DET", "NE"]
     assert pro_teams_in("San Francisco 49ers vs Washington Commanders") == ["SF", "WSH"]
     assert pro_teams_in("Ohio State vs Northwestern") == []
+
+
+# ESPN's halftime scorebug, as OCR read it (Ravens-Chargers MNF): a countdown where the clock goes.
+ESPN_COUNTDOWN = [
+    ("EFTMNF", "17", "1044.", "COUNTOUNE {}", "TO 2nd HALF"),
+    ("E5FTMNF", "17", "104A.", "COUNTUOAE {}"),
+    ("ESPTMNF", "10465", "COUNTOONN {}", "TO 2nd HALF"),
+    ("EFTMNF", "17", "COUNTOOVAN", "{}", "RAVENS I TRYING TO AVOID 1st 5-GAME LOSING STREAK SINCE 2021"),
+    ("ETMNF", ". 17", "114", "SUNTOUNN {}"),
+    ("ESFTMNF", "17", "{}", "RAVENS / WON 4 OF LAST 5 GAMES ON MNF DATING BACK TO 2022"),  # word unread
+]
+
+
+def countdown(c, start_clock, t0, seconds, step=2.0):
+    t, i = t0, 0
+    while t < t0 + seconds:
+        left = int(start_clock - (t - t0))
+        raw = [x.format(f"{left // 60}:{left % 60:02d}") for x in ESPN_COUNTDOWN[i % len(ESPN_COUNTDOWN)]]
+        c.update(parse(texts(*raw)), t, raw)
+        t, i = t + step, i + 1
+    return t
+
+
+def test_espn_halftime_countdown_isnt_the_game_clock():
+    for raw in ESPN_COUNTDOWN[:5]:
+        r = parse(texts(*[x.format("1:14") for x in raw]))
+        assert r.countdown and r.halftime and r.clock is None
+    r = parse(texts("COUNTDOWN 4:59", "TO KICKOFF"))
+    assert r.countdown and not r.halftime and r.clock is None
+    # We missed the end of the half (last read Q2 2:30); the countdown runs steadily for minutes.
+    c = GameClock()
+    feed(c, 2, 180, 0, 30)
+    before = c.max_elapsed
+    t = countdown(c, 600, 1000, 300)
+    assert c.halftime_since is not None and c.in_halftime(t, 300)
+    assert c.max_elapsed == before and not c.live(t)
+    # The 3rd quarter kicks off: halftime's over.
+    feed(c, 3, 900, t + 60, 20)
+    assert c.halftime_since is None and c.halftime_done and c.live(t + 78)
+
+
+def test_espn_mnf_logo_votes_espn():
+    votes = gameclock.network_votes(["ESPTMNF", "17", "WEEK 11"])
+    assert votes["ESPN"] == 1
+    assert gameclock.network_votes(["E5FTMNF"])["ESPN"] == 1 and gameclock.network_votes(["ESFTMNE"])["ESPN"] == 1

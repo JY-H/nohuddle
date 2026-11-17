@@ -65,6 +65,7 @@ class Reading:
     break_panel: bool = False  # a break screen with the game shrunk into a box (see BREAK_PANEL_RE)
     next_gen_stats: bool = False  # a "Next Gen Stats" graphic: the NFL's own feed shows them in breaks
     down: bool = False  # a down and distance ("1ST & 10") on the scorebug: the offense is on the field
+    countdown: bool = False  # "COUNTDOWN TO 2ND HALF" (halftime) or "... TO KICKOFF": its clock isn't the game's
 
     def elapsed(self, period: int) -> int | None:
         """Game seconds elapsed, for periods of `period` seconds (overtime counts on from the end)."""
@@ -114,6 +115,10 @@ def _drop_down_and_distance(texts: list[Text]) -> list[Text]:
 BREAK_PANEL_RE = re.compile(r"\bGAME\s*BREAK\b|\bEYE\s*ON\s*THE\s*FIELD\b")
 NEXT_GEN_RE = re.compile(r"NEXT\s*GEN\b")
 PREVIEW_RE = re.compile(r"COMING\s*UP|UP\s*NEXT|STILL\s*TO\s*COME|AHEAD\s*ON")
+# ESPN's halftime scorebug: "COUNTDOWN 1:14 / TO 2ND HALF" where the quarter and clock go, over the
+# halftime show and its ads. OCR mangles the word ("COUNTOOWN", "COUNTUDNT", "SUNTOUNN").
+COUNTDOWN_RE = re.compile(r"\bCOUNT[OUD]|UNTOUN|\bT[O0]\s*2\s*N[D0]\s*HALF\b")
+KICKOFF_RE = re.compile(r"KICK\s*OFF")
 
 
 def parse(texts: list[Text]) -> Reading:
@@ -125,6 +130,9 @@ def parse(texts: list[Text]) -> Reading:
         return Reading(break_panel=True)
     if any(NEXT_GEN_RE.search(t.s) for t in texts):
         return Reading(next_gen_stats=True)  # a stats graphic: nothing on it is the game clock
+    joined = " | ".join(t.s for t in texts)
+    if COUNTDOWN_RE.search(joined):
+        return Reading(countdown=True, halftime=not KICKOFF_RE.search(joined))
     downs = {int(m.group(0)[0]) for t in texts for m in DOWN_DISTANCE_RE.finditer(t.s)}
     r.down = bool(downs)
     texts = _drop_down_and_distance(texts)
@@ -198,7 +206,7 @@ NETWORK_PATTERNS = [
     ("FOX", r"\bFOX\b"),
     ("CBS", r"\bCBS"),  # often read as one word: "CBSSPORTS"
     ("NBC", r"\bNBC\b|PEACOCK|SUNDAY NIGHT FOOTBALL"),
-    ("ESPN", r"\bESPN|\bE5PN|MONDAY NIGHT FOOTBALL"),
+    ("ESPN", r"\bESPN|\bE5PN|MONDAY NIGHT FOOTBALL|MN[FE]\b"),  # "ESPN MNF" often reads "ESPTMNF"
     ("ABC", r"\babc\b"),
     ("Prime Video", r"PRIME\s*VIDEO|\bTNF\b|THURSDAY NIGHT FOOTBALL"),
     ("Netflix", r"NETFLIX"),
@@ -277,6 +285,7 @@ class ClockSettings:
     half_end_window: float = 120.0  # game seconds before the half in which a long break can be halftime
     halftime_graphic_within: float = 10.0  # game seconds before the half in which "HALFTIME" counts
     half_not_over_slack: int = 5  # a halftime ends on 2nd-quarter time this close to where it stopped
+    countdown_memory: float = 30.0  # a lone clock this soon after a countdown is the countdown, word unread
     verdict_ttl: float = 8.0  # how long a single reading's verdict stands
     min_halftime: float = 12 * 60  # fallback when the clock can't be read: NFL ~13 min
     halftime_resume_scorebug: float = 30.0  # ...and the scorebug back this long
@@ -311,6 +320,7 @@ class GameClock:
         self._run_pending: tuple[float, int] | None = None  # a stray reading that may start a new run
         self._quarter: tuple[float, int, int] | None = None  # (wall time, quarter, clock) last read
         self._halftime_hint: float | None = None
+        self.countdown_at: float | None = None  # last read a countdown (see Reading.countdown)
         self.break_panel_at: float | None = None  # last read a "Game Break" screen
         self.next_gen_at: float | None = None  # last read a "Next Gen Stats" graphic
         self._verdict: tuple[float, str] | None = None  # (wall time, "live" | "highlight" | "other game")
@@ -370,6 +380,14 @@ class GameClock:
                 self.halftime_since, self.halftime_done = None, False
         self.break_panel_at = t if r.break_panel else None  # cleared by the next read without it
         self.next_gen_at = t if r.next_gen_stats else None
+        if r.countdown:
+            # Counting down to the 2nd half: it's halftime, whatever the clock said before.
+            self.countdown_at = t
+            if r.halftime:
+                self._start_halftime(t, by_clock=True)
+            return
+        if r.quarter is None and self.countdown_at is not None and t - self.countdown_at <= self.s.countdown_memory:
+            return  # the countdown again, with its word misread: not the game clock
         # The clock decides (2ND 0:00, or a long break at the very end of the half - see
         # note_intermission). A "HALFTIME" graphic (not a "coming up" promo, see parse()) only
         # counts in the last seconds of the half, or when there's no clock to go by: sponsors'
