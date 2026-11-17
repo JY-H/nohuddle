@@ -665,10 +665,12 @@ class Controller:
             return web.json_response({"ok": False, "error": "Couldn't load the matchup from ESPN right now."})
 
     async def _api_fantasy_on_screen(self, req: web.Request) -> web.Response:
-        """Fantasy players (rostered anywhere in the league, or big-day free agents) in the game with sound."""
+        """Fantasy players (rostered anywhere in the league, or big-day free agents) in the game with sound
+        - or, with every game on a break, the most preferred one."""
         if self.fantasy is None:
             return web.json_response({"ok": False, "error": "Fantasy isn't set up for this checkout."})
-        w = self.watched.get(self.active) if self.active else None
+        gid = self.active if self.active in self.watched else next(iter(self.priority), None)
+        w = self.watched.get(gid) if gid else None
         teams = pro_teams_in(w.game.title) if w else []
         if not teams:
             return web.json_response({"ok": True, "game": w.game.title if w else None, "teams": []})
