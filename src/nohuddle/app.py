@@ -23,6 +23,7 @@ from .detector import W, H, BreakDetector, DetectorSettings, State, network_name
 from .gameclock import ClockSettings
 from .health import PlaybackHealth
 from .fantasy import Fantasy, pro_teams_in
+from .scorigami import Scorigami
 from .networks import NetworkLibrary
 from .sports import sport_for
 from .streams import Game, StreamSite
@@ -151,6 +152,7 @@ class Controller:
         self.auto = cfg.get("auto", True)
         self.mode = cfg.get("mode", "single")  # "single" or "multi"
         self.max_tiles = int(cfg.get("max_tiles", 0))  # multiview: at most this many games (0 = all)
+        self.scorigami = Scorigami(CONFIG_DIR / "scorigami.json")  # the break screen's other tab
         env = _local_env()
         league, team = env.get("ESPN_LEAGUE_ID"), env.get("ESPN_TEAM_ID")
         # Your fantasy matchup for the drawer, read from ESPN's fantasy API with your session.
@@ -558,6 +560,8 @@ class Controller:
         r.add_post("/api/espn-open", self._api_espn_open)
         r.add_get("/api/fantasy", self._api_fantasy)
         r.add_get("/api/fantasy/on-screen", self._api_fantasy_on_screen)
+        r.add_get("/api/scorigami", self._api_scorigami)
+        r.add_get("/api/scorigami/table", self._api_scorigami_table)
         return app
 
     async def _api_games(self, req: web.Request) -> web.Response:
@@ -671,6 +675,19 @@ class Controller:
         except Exception as e:
             log.warning("Fantasy: couldn't load the matchup: %s", type(e).__name__)
             return web.json_response({"ok": False, "error": "Couldn't load the matchup from ESPN right now."})
+
+    async def _api_scorigami(self, req: web.Request) -> web.Response:
+        """Scorigami watch for the NFL games on the watchlist, in priority order."""
+        games = [(w.game.title, pro_teams_in(w.game.title)) for g in self.priority
+                 if (w := self.watched[g]).game.league == "nfl"]
+        try:
+            return web.json_response({"ok": True, **await self.scorigami.board(games)})
+        except Exception as e:
+            log.warning("Scorigami: couldn't load scores: %s", type(e).__name__)
+            return web.json_response({"ok": False, "error": "Couldn't load scores from ESPN right now."})
+
+    async def _api_scorigami_table(self, req: web.Request) -> web.Response:
+        return web.json_response({"scores": self.scorigami.table()})
 
     async def _api_fantasy_on_screen(self, req: web.Request) -> web.Response:
         """Fantasy players (rostered anywhere in the league, or big-day free agents) in the game with sound

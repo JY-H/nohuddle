@@ -1,3 +1,5 @@
+from datetime import date as date_type, timedelta as timedelta_type
+
 import cv2
 import numpy as np
 
@@ -918,3 +920,49 @@ def test_a_networks_other_looks_go_by_its_name():
     d = BreakDetector(read_clock=False)
     d.network = "NFL Broadcast (2)"  # the world feed as another stream source frames it
     assert d.feed() == "NFL Broadcast"  # still gets the world feed's rules
+
+
+def test_scorigami_history_and_model():
+    from nohuddle import scorigami as sg
+
+    through, history = sg.load_history()
+    assert len(history) >= 1100 and history[(20, 17)][0] > 250 and (73, 0) in history
+    rng = np.random.default_rng(0)
+    # Over, not tied: the score stands. Tied with no time left: overtime settles most.
+    assert (sg.simulate(24, 17, 0, rng, 100) == [24, 17]).all()
+    ot = sg.simulate(20, 20, 0, rng, 4000)
+    assert 0.85 < np.mean(ot[:, 0] != ot[:, 1]) < 0.97
+    # From kickoff, league-average scoring makes ~2.5% of finals new (2018-2025: 61 of 2,377 games).
+    assert 0.015 < sg.chances(0, 0, 3600, set(history), rng)["p"] < 0.035
+    # Late and already on a never-seen score: very likely to end as one.
+    late = sg.chances(52, 51, 10, {(20, 17)}, rng)
+    assert late["p"] > 0.9 and late["likeliest"][0]["score"] == "52–51"
+
+
+def test_scorigami_board(tmp_path):
+    import asyncio
+
+    from nohuddle import scorigami as sg
+
+    def event(day, state, home, away, period=0, clock=0.0):
+        return {"date": f"{day}T18:00Z", "shortName": f"{away[0]} @ {home[0]}",
+                "status": {"period": period, "clock": clock, "type": {"state": state, "shortDetail": "x"}},
+                "competitions": [{"competitors": [{"team": {"abbreviation": t}, "score": str(p)}
+                                                  for t, p in (home, away)]}]}
+    board = sg.Scorigami(tmp_path / "scorigami.json")
+    day = (date_type.fromisoformat(board.through) + timedelta_type(days=1)).isoformat()
+    events = [event(day, "post", ("DAL", 61), ("WSH", 59)),  # never happened
+              event(day, "in", ("BAL", 17), ("LAC", 10), 3, 300.0),
+              event(day, "pre", ("KC", 0), ("DEN", 0))]
+
+    async def fake_events():
+        return events
+    board._events = fake_events
+    out = asyncio.run(board.board([("Cowboys vs Commanders", ["DAL", "WSH"]), ("Ravens vs Chargers", ["BAL", "LAC"]),
+                                   ("Chiefs vs Broncos", ["KC", "DEN"]), ("Bills vs Jets", ["BUF", "NYJ"])]))
+    final, live, pre, missing = out["games"]
+    assert final["p"] == 1.0 and final["now"]["times"] == 0
+    assert out["latest"] == [{"score": "61–59", "game": "WSH @ DAL", "date": day}]
+    assert out["distinct"] == len(board.history) + 1
+    assert live["now"]["times"] > 0 and 0 <= live["p"] < 0.2  # 17-10 has happened plenty
+    assert 0.01 < pre["p"] < 0.04 and not missing["found"]

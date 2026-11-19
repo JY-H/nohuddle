@@ -13,7 +13,21 @@
     <h1 id="empty-title">All games on break</h1>
     <p id="empty-sub">Switching back as soon as one returns.</p>
     <ul id="empty-list"></ul>
+    <div id="break-tabs" class="break-tabs" hidden>
+      <button data-pane="runner">Runner</button><button data-pane="scorigami">Scorigami</button>
+    </div>
     <canvas id="runner" title="Space / ↑ to jump, ↓ to duck"></canvas>
+    <div id="scorigami" hidden>
+      <div id="sg-games"></div>
+      <figure id="sg-grid">
+        <figcaption>Every NFL final score <small>hover a square for how often, and when last</small></figcaption>
+        <div class="sg-plot"><canvas id="sg-canvas"></canvas><div id="sg-tip" hidden></div></div>
+        <div class="sg-legend">
+          <span>Times it's happened</span><span class="sg-scale"><span class="sg-ramp"></span><span class="sg-ticks" id="sg-ticks"></span></span>
+          <span class="sg-key"><i class="never"></i>Never (scorigami)</span><span class="sg-key"><i class="blocked"></i>Impossible</span><span class="sg-key"><i class="mine"></i>Your games now</span>
+        </div>
+      </figure>
+    </div>
   </div>
   <div id="toast" hidden></div>
   <button id="fantasy-toggle" title="Your fantasy matchup (C)">🏈</button>

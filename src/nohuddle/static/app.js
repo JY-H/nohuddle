@@ -122,7 +122,15 @@ function renderStage() {
 
   const empty = state.games.length > 0 && state.visible.length === 0;
   $('#empty').hidden = !empty;
-  Runner.setActive(empty);
+  // The break screen's tabs: the runner game, and (with NFL games on) the scorigami watch.
+  const nfl = state.games.some((g) => g.league === 'nfl');
+  const pane = nfl ? breakPane : 'runner';
+  $('#break-tabs').hidden = !nfl;
+  for (const b of document.querySelectorAll('#break-tabs button')) b.classList.toggle('on', b.dataset.pane === pane);
+  $('#runner').hidden = pane !== 'runner';
+  $('#scorigami').hidden = pane !== 'scorigami';
+  Runner.setActive(empty && pane === 'runner');
+  watchScorigami(empty && pane === 'scorigami');
   if (empty) {
     const solo = state.games.length === 1 ? state.games[0] : null;
     const why = solo && { halftime: 'Halftime', highlight: 'Showing highlights', 'other game': 'Showing another game' }[solo.detail];
@@ -137,6 +145,138 @@ function renderStage() {
   if (wasEmpty && !empty && chimeOn()) chime();
   wasEmpty = empty;
 }
+
+// ---------- scorigami ----------
+
+let breakPane = localStorage.getItem('break-pane') || 'runner', scorigamiTimer = null;
+document.querySelector('#break-tabs').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-pane]');
+  if (!b) return;
+  breakPane = b.dataset.pane;
+  localStorage.setItem('break-pane', breakPane);
+  if (state) renderStage();
+});
+function watchScorigami(on) {
+  if (on && !scorigamiTimer) { loadScorigami(); scorigamiTimer = setInterval(loadScorigami, 30000); }
+  if (!on && scorigamiTimer) { clearInterval(scorigamiTimer); scorigamiTimer = null; }
+}
+const pct = (p) => (p >= 0.999 ? '100%' : p > 0 && p < 0.001 ? '<0.1%' : `${(p * 100).toFixed(1)}%`);
+const year = (d) => (d ? d.slice(0, 4) : '');
+async function loadScorigami() {
+  const d = await (await fetch('/api/scorigami')).json().catch(() => ({ ok: false, error: 'App not reachable.' }));
+  const el = $('#sg-games');
+  if (!d.ok) { el.innerHTML = `<p class="hint">${esc(d.error)}</p>`; return; }
+  const games = d.games.map((g) => {
+    if (!g.found) return `<div class="sg-game"><span class="sg-score">${esc(g.title)}</span><span class="sg-p">–</span>
+      <span class="sg-now">Not on ESPN's scoreboard today.</span></div>`;
+    const [a, b] = g.teams;
+    const hi = Math.max(a.score, b.score), lo = Math.min(a.score, b.score);
+    const never = g.now.times === 0;
+    const now = g.state === 'pre' ? 'Not started yet.'
+      : g.state === 'post' ? (never ? `<span class="sg-yes">Final: ${hi}–${lo} — scorigami!</span>`
+        : `Final: ${hi}–${lo}, the ${g.now.times + 1}${ordinal(g.now.times + 1)} time.`)
+      : never ? `<span class="sg-yes">If it ended now: ${hi}–${lo} has never happened.</span>`
+      : `If it ended now: ${hi}–${lo} has happened ${g.now.times}× (last ${year(g.now.last)}).`;
+    const shortlist = g.state === 'post' ? [] : g.likeliest.filter((x) => x.p >= 0.005);  // skip long shots
+    const likely = shortlist.length
+      ? `<span class="sg-likely">Likeliest new final${shortlist.length > 1 ? 's' : ''}: ${shortlist.map((x) => `${x.score} (${pct(x.p)})`).join(' · ')}</span>` : '';
+    return `<div class="sg-game">
+      <span class="sg-score">${esc(a.abbrev)} ${a.score} – ${b.score} ${esc(b.abbrev)}<small>${esc(g.status)}</small></span>
+      <span class="sg-p">${pct(g.p)}<small>scorigami</small></span>
+      <span class="sg-now">${now}</span>${likely}</div>`;
+  }).join('');
+  const latest = d.latest.length
+    ? `<p class="hint">Newest scorigami${d.latest.length > 1 ? 's' : ''}: ${d.latest.map((x) => `${esc(x.score)} (${esc(x.game)})`).join(', ')}</p>` : '';
+  el.innerHTML = `${games || '<p class="hint">No NFL games on the watchlist.</p>'}${latest}
+    <p class="hint">${d.distinct.toLocaleString()} different final scores in NFL history. Chances are approximate.</p>`;
+  const mine = d.games.filter((g) => g.found && g.state !== 'pre')
+    .map((g) => ({ w: Math.max(...g.teams.map((t) => t.score)), l: Math.min(...g.teams.map((t) => t.score)),
+      name: g.teams.map((t) => `${t.abbrev} ${t.score}`).join(' – ') }));
+  if (!sgTable || Date.now() - sgTable.at > 600000 || d.distinct !== sgTable.scores.length) {
+    const t = await (await fetch('/api/scorigami/table')).json().catch(() => null);
+    if (t) sgTable = { at: Date.now(), scores: t.scores };
+  }
+  if (sgTable) drawScorigamiGrid(sgTable.scores, mine);
+}
+
+// The whole table: winning score across the top, losing score down the right, every score
+// labelled. Cells are coloured by how often that final has happened (log scale, one blue ramp:
+// rare finals sit dark, near the surface; common ones light); finals that never have are empty
+// outlines; impossible ones (a loser ahead of the winner, or a team on 1 point) are blocked out.
+let sgTable = null, sgHover = null;
+const SG = { cell: 13, gap: 1, left: 4, top: 34, right: 46, bottom: 4, maxW: 73, maxL: 51 };
+const sgX = (w, step) => SG.left + w * step;  // winning score across
+const sgY = (l, step) => SG.top + l * step;  // losing score down
+const sgPossible = (w, l) => l <= w && w !== 1 && l !== 1;
+const SG_RAMP = ['#184f95', '#1c5cab', '#256abf', '#2a78d6', '#3987e5', '#5598e7', '#6da7ec', '#86b6ef', '#9ec5f4', '#b7d3f6', '#cde2fb'];
+const SG_BLOCKED = '#1b1f25', SG_NEVER = '#2f3640';
+function drawScorigamiGrid(scores, mine) {
+  const canvas = $('#sg-canvas'), dpr = window.devicePixelRatio || 1;
+  const byKey = new Map(scores.map(([w, l, n, last]) => [w * 1000 + l, { n, last }]));
+  const maxW = Math.max(SG.maxW, ...scores.map((s) => s[0]), ...mine.map((m) => m.w));
+  const maxL = Math.max(SG.maxL, ...scores.map((s) => s[1]), ...mine.map((m) => m.l));
+  const most = Math.max(...scores.map((s) => s[2]));
+  const step = SG.cell + SG.gap;
+  const W = SG.left + (maxW + 1) * step + SG.right, H = SG.top + (maxL + 1) * step + SG.bottom;
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  canvas.style.aspectRatio = `${W} / ${H}`;
+  canvas.style.width = `min(100%, ${W}px)`;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  // Axis titles and every score.
+  const right = sgX(maxW + 1, step);
+  ctx.fillStyle = '#c3c9d2'; ctx.font = '600 11px system-ui'; ctx.textAlign = 'center';
+  ctx.fillText('Winning team score', (SG.left + right) / 2, 11);
+  ctx.save(); ctx.translate(W - 8, (SG.top + sgY(maxL + 1, step)) / 2); ctx.rotate(Math.PI / 2);
+  ctx.fillText('Losing team score', 0, 0); ctx.restore();
+  ctx.fillStyle = '#8a93a3'; ctx.font = '9px system-ui';
+  for (let w = 0; w <= maxW; w++) ctx.fillText(String(w), sgX(w, step) + SG.cell / 2, SG.top - 6);
+  ctx.textAlign = 'left';
+  for (let l = 0; l <= maxL; l++) ctx.fillText(String(l), right + 4, sgY(l, step) + SG.cell - 3);
+  for (let l = 0; l <= maxL; l++) {
+    for (let w = 0; w <= maxW; w++) {
+      const x = sgX(w, step), y = sgY(l, step), hit = byKey.get(w * 1000 + l);
+      if (!sgPossible(w, l)) {
+        ctx.fillStyle = SG_BLOCKED;  // gapless, so it reads as one region rather than cells
+        ctx.fillRect(x, y, step, step);
+      } else if (hit) {
+        ctx.fillStyle = SG_RAMP[Math.round(Math.log(hit.n) / Math.log(most) * (SG_RAMP.length - 1))];
+        ctx.fillRect(x, y, SG.cell, SG.cell);
+      } else {
+        ctx.strokeStyle = SG_NEVER; ctx.lineWidth = 1;
+        ctx.strokeRect(x + 0.5, y + 0.5, SG.cell - 1, SG.cell - 1);
+      }
+    }
+  }
+  for (const m of mine) {  // a 2px ring with a surface gap, so it reads on any cell colour
+    const x = sgX(m.w, step), y = sgY(m.l, step);
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 4; ctx.strokeRect(x - 2, y - 2, SG.cell + 4, SG.cell + 4);
+    ctx.strokeStyle = '#f2f4f7'; ctx.lineWidth = 2; ctx.strokeRect(x - 2, y - 2, SG.cell + 4, SG.cell + 4);
+  }
+  // Legend ticks where those counts fall on the log scale.
+  $('#sg-ticks').innerHTML = [1, 10, 100].filter((n) => Math.log(n) / Math.log(most) < 0.75).concat(most)
+    .map((n) => `<span style="left:${(Math.log(n) / Math.log(most)) * 100}%">${n}</span>`).join('');
+  sgHover = { byKey, mine, maxW, maxL, step, W };
+}
+$('#sg-canvas').addEventListener('pointermove', (e) => {
+  const tip = $('#sg-tip');
+  if (!sgHover) return;
+  const r = e.currentTarget.getBoundingClientRect(), k = sgHover.W / r.width;
+  const w = Math.floor(((e.clientX - r.left) * k - SG.left) / sgHover.step);
+  const l = Math.floor(((e.clientY - r.top) * k - SG.top) / sgHover.step);
+  if (w < 0 || l < 0 || w > sgHover.maxW || l > sgHover.maxL || !sgPossible(w, l)) { tip.hidden = true; return; }
+  const hit = sgHover.byKey.get(w * 1000 + l);
+  const games = sgHover.mine.filter((m) => m.w === w && m.l === l).map((m) => ` · now: ${m.name}`).join('');
+  tip.textContent = hit
+    ? `${w}–${l}: ${hit.n.toLocaleString()} time${hit.n > 1 ? 's' : ''}, last ${hit.last}${games}`
+    : `${w}–${l}: never happened${games}`;
+  tip.style.left = `${(sgX(w, sgHover.step) + SG.cell / 2) / k}px`;
+  tip.style.top = `${sgY(l, sgHover.step) / k}px`;
+  tip.hidden = false;
+});
+$('#sg-canvas').addEventListener('pointerleave', () => { $('#sg-tip').hidden = true; });
+const ordinal = (n) => (n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th');
 
 // A soft two-note chime when play comes back after everything was on a break.
 let wasEmpty = false, audio = null;

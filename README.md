@@ -13,11 +13,12 @@ Needs [uv](https://docs.astral.sh/uv/) and Google Chrome (the app drives your in
 
 - **Add games** from the list (pick a league) or paste a game page URL.
 - **Drag** the watchlist to set priority. #1 is your main game.
-- **Single** shows one game; **Multiview** shows every game that's live, with the top one big and unmuted. Games on a break are never shown; if everything's on a break you get a "all games on break" screen.
+- **Single** shows one game; **Multiview** shows every game that's live, with the top one big and unmuted. Games on a break are never shown; if everything's on a break you get a "all games on break" screen, with a little runner game (Space / ↑ to jump, ↓ to duck) and, when NFL games are on, a **Scorigami** tab.
 - **Watch now** / click a tile / keys `1`–`9` pins a game (manual control). **Resume auto** or `A` unpins.
 - **It's a break** / **Not a break** fix a wrong call. "Not a break" on a detected break makes it relearn that game.
 - **Source** picks a mirror; the app also switches mirrors itself when a stream is laggy or dead.
 - 🏈 / `C` opens a drawer with your ESPN fantasy football matchup (live points and projections, both lineups). **Open on ESPN** opens ESPN's own Fantasycast in a tab.
+- **Scorigami** (NFL): for each game on the watchlist, whether the score would be a [scorigami](https://nflscorigami.com/) (a final score that's never happened) if it ended now, and the chance it ends on one. See [Scorigami](#scorigami).
 - 👁 shows what the detector sees (green = overlay visible, red = learned but not visible).
 - Keys: `S` panel, `M` single/multi, `F` fullscreen.
 
@@ -59,6 +60,13 @@ Polling: the main game and a higher-priority game you're waiting on every 1s, th
 
 Stream health: no video progress for 15s = stalled (reload, then next mirror); less than 0.85s of video per second or 3+ rebuffers in a minute = laggy (next mirror, at most every 2 minutes). Games with a single source are just marked laggy.
 
+## Scorigami
+
+`scorigami.py` judges each NFL game on the watchlist against every final score in NFL (and AFL) history: 1,100 different ones through week 10 of 2026, the same set nflscorigami.com has.
+
+- **History** ships in `src/nohuddle/scorigami_scores.json` (built by `tools/scorigami_data.py` from FiveThirtyEight's Elo data for 1920-1998 and nflverse's schedule since). It keeps itself current without a rebuild: once a day the games since are read from nflverse's schedule (cached in `data/scorigami.json`), and anything newer from ESPN's public scoreboard, which also gives live scores and clocks.
+- **The chance** is simulated: the rest of the game, about 22 drives a full game, each ending in a touchdown (and its extra point, two-point try or miss), field goal, safety, defensive score or nothing at league-average rates, then overtime if it's tied. From kickoff that makes ~2.5% of finals new, as in 2018-2025 (61 of 2,377 games). It doesn't know who has the ball or how teams play a lead, so treat it as rough.
+
 ## Popups
 
 Stream iframes never receive clicks (`pointer-events: none`), `window.open` is disabled in every frame, any new tab/window is closed immediately, navigation away from the app is reverted, and the ad servers each player declares in its config are blocked.
@@ -67,4 +75,5 @@ Stream iframes never receive clicks (`pointer-events: none`), `window.open` is d
 
 - `tools/replay.py DIR --sheet out.jpg` — run the detector over recorded frames (`NNNNN.jpg`, named by second) and make a colour-coded contact sheet.
 - `tools/regions.py DIR LEARN_UNTIL OUT.jpg T...` — draw learned regions and scores on chosen frames.
+- `tools/scorigami_data.py` — rebuild the bundled scorigami history.
 - `uv run pytest`
