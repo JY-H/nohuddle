@@ -674,6 +674,30 @@ def yard_lined_field(t: float) -> np.ndarray:
     return img
 
 
+def green_backdrop_ad(t: float) -> np.ndarray:
+    """A sportsbook ad: a presenter (changing) framed by a still green "field" backdrop, with white
+    panel borders that even look like yard lines."""
+    img = np.zeros((360, 640, 3), np.uint8)
+    img[:] = (40, 150, 50)
+    img[30:290, 150:610] = cv2.cvtColor(cv2.cvtColor(scene(t)[30:290, 150:610], cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)
+    for x0, y0, x1, y1 in ((150, 30, 610, 30), (150, 290, 610, 290), (150, 30, 150, 290), (610, 30, 610, 290), (10, 300, 630, 300)):
+        cv2.line(img, (x0, y0), (x1, y1), (245, 245, 245), 3)
+    return img
+
+
+def test_green_backdrop_ad_is_not_the_field():
+    """From a report (TNF, Prime Video): a DraftKings ad on a green backdrop passed for field green
+    (43% of the frame, and its panel borders for yard lines), so it played as live."""
+    from nohuddle.football import field_share
+    from nohuddle.sports import NFL
+    assert field_share(green_backdrop_ad(0)) >= 0.35
+    det = BreakDetector(read_clock=False, extras=NFL.make_extras())
+    run(det, broadcast, 0, 150)
+    assert run(det, green_backdrop_ad, 150, 165) == State.BREAK
+    run(det, broadcast, 165, 200)
+    assert run(det, field, 200, 215) == State.LIVE  # a real replay still stays on screen
+
+
 def test_feed_without_graphics_stays_on_screen_while_the_field_is_shown():
     """From a report: an international feed dropped its scorebug and logo for minutes of play.
     Past the field-green allowance, yard lines still mark it as football."""

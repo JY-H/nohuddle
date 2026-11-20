@@ -22,13 +22,36 @@ class FieldSettings:
     # but they keep a feed whose graphics dropped out for minutes on screen.
     yard_lines: int = 3
     back_after: int = 3  # frames of overlays in a row before the allowance resets
+    # A sportsbook ad on a green "field" backdrop has the share, and even straight white lines (its
+    # panel borders), but its green is all around the edges and doesn't move. A field fills the
+    # middle of the picture (close-ups ~10%+), and players or the camera move over it (a still
+    # pre-snap shot is green in the middle).
+    graphic_center: float = 0.06  # at most this share of the middle green...
+    graphic_still: float = 1.5  # ...and the green changing less than this (mean grey level) a frame
+
+
+def _green(small_bgr: np.ndarray, min_saturation: int = 50) -> np.ndarray:
+    hsv = cv2.cvtColor(small_bgr, cv2.COLOR_BGR2HSV)
+    h, s, v = hsv[..., 0], hsv[..., 1], hsv[..., 2]
+    return (h >= 30) & (h <= 90) & (s >= min_saturation) & (v >= 40)
 
 
 def field_share(frame_bgr: np.ndarray, min_saturation: int = 50) -> float:
     """Share of the frame that's field green. (Some turf, e.g. MetLife's, is greyer: ~45.)"""
-    hsv = cv2.cvtColor(cv2.resize(frame_bgr, (160, 90), interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2HSV)
-    h, s, v = hsv[..., 0], hsv[..., 1], hsv[..., 2]
-    return float(((h >= 30) & (h <= 90) & (s >= min_saturation) & (v >= 40)).mean())
+    return float(_green(cv2.resize(frame_bgr, (160, 90), interpolation=cv2.INTER_AREA), min_saturation).mean())
+
+
+def green_layout(frame_bgr: np.ndarray, prev_bgr: np.ndarray | None) -> tuple[float, float, float | None]:
+    """(green share of the frame, of its middle quarter, how much the green changed since `prev`)."""
+    small = cv2.resize(frame_bgr, (160, 90), interpolation=cv2.INTER_AREA)
+    green = _green(small)
+    moved = None
+    if prev_bgr is not None and green.any():
+        prev = cv2.resize(prev_bgr, (160, 90), interpolation=cv2.INTER_AREA)
+        diff = np.abs(cv2.cvtColor(small, cv2.COLOR_BGR2GRAY).astype(np.float32)
+                      - cv2.cvtColor(prev, cv2.COLOR_BGR2GRAY).astype(np.float32))
+        moved = float(diff[green].mean())
+    return float(green.mean()), float(green[22:68, 40:120].mean()), moved
 
 
 def yard_lines(frame_bgr: np.ndarray) -> int:
@@ -59,6 +82,9 @@ class FieldOnScreen:
         self.s = settings or FieldSettings()
         self._shares: deque[float] = deque(maxlen=self.s.smooth)
         self._lines: deque[int] = deque(maxlen=self.s.smooth)
+        self._centers: deque[float] = deque(maxlen=self.s.smooth)
+        self._moves: deque[float] = deque(maxlen=self.s.smooth)
+        self._prev: np.ndarray | None = None
         self._game_seen_at: float | None = None
         self._overlay_streak = 0
 
@@ -66,16 +92,24 @@ class FieldOnScreen:
         self._overlay_streak = self._overlay_streak + 1 if any_overlay else 0
         if clearly_game or self._overlay_streak >= self.s.back_after:
             self._game_seen_at = t
+        prev, self._prev = self._prev, frame_bgr
         if any_overlay:
-            self._shares.clear()
-            self._lines.clear()
+            for d in (self._shares, self._lines, self._centers, self._moves):
+                d.clear()
             return False
         if self._game_seen_at is None:
             return False
-        self._shares.append(field_share(frame_bgr))
+        share, center, moved = green_layout(frame_bgr, prev)
+        self._shares.append(share)
+        self._centers.append(center)
+        if moved is not None:
+            self._moves.append(moved)
         if len(self._shares) < self._shares.maxlen or float(np.mean(self._shares)) < self.s.share:
             self._lines.clear()
             return False
+        if (float(np.mean(self._centers)) < self.s.graphic_center and len(self._moves) == self._moves.maxlen
+                and float(np.median(self._moves)) < self.s.graphic_still):  # (a cut into it is one big change)
+            return False  # a green frame around something else, standing still: a graphic
         if t - self._game_seen_at <= self.s.cap:
             return True
         self._lines.append(yard_lines(frame_bgr))  # only needed past the cap
