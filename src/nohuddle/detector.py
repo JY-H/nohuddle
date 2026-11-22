@@ -52,6 +52,9 @@ class DetectorSettings:
     region_match: float = 0.35  # correlation with the learned edge pattern needed to count as present
     min_region_px: int = 20  # persistent edge pixels needed for a region
     max_region_area: float = 0.15  # bounding box larger than this share of the frame = scenery
+    # All regions together covering more than this isn't overlays but a still picture (a stream's
+    # "starting soon" slate): every edge in it persists. Real overlays measured <=0.12.
+    max_overlay_area: float = 0.25
     # Seconds with no overlay (neither scorebug nor logo) before declaring a break. With field
     # footage and the clock also counting as the game, on ~12 min of ad-free NFL broadcast 3s
     # switched away no more than 4s did (2s added a false switch on a close-up), and leaves ads
@@ -134,6 +137,8 @@ class OverlayModel:
             t = template[rows, cols] - template[rows, cols].mean()
             self.regions.append((rows, cols, t / (np.linalg.norm(t) + 1e-6)))
             sizes.append(size)
+        if sum((r.stop - r.start) * (c.stop - c.start) for r, c, _ in self.regions) > s.max_overlay_area * W * H:
+            self.regions, sizes = [], []
         # The biggest overlay is the scorebug; the others are logos and the like.
         self.primary = int(np.argmax(sizes)) if sizes else -1
 
@@ -195,6 +200,7 @@ class BreakDetector:
         self._clock_disagrees_since: float | None = None
         self._stuck_since: float | None = None
         self._overlay_since: float | None = None
+        self._any_overlay_at = -1e9
         self._recent_overlays: deque[tuple[float, bool]] = deque()
         self._turf: deque[float] = deque(maxlen=3)  # field share of the last few frames
         self.relearned = 0  # times the model was thrown away as wrong
@@ -295,6 +301,8 @@ class BreakDetector:
             self.clock.update(gameclock.parse(texts), t, [x.s for x in texts])
             self.network_votes.update(gameclock.network_votes([x.s for x in texts]))
         self._overlay_since = (self._overlay_since or t) if any_overlay else None
+        if any_overlay:
+            self._any_overlay_at = t
         # Logo steadily up (not one stray frame that resembles it) while the scorebug's been gone.
         # Not while the clock says we're mid-half, though: then it's play with the scorebug missing
         # (a feed's graphics dropping out), not a halftime show.
@@ -387,8 +395,13 @@ class BreakDetector:
                      and np.mean([up for _, up in self._recent_overlays]) >= 0.7)
         # With seconds left in the half, though, only the clock will do: graphics and logos alone
         # are the start of the halftime show.
+        # ...or the sport's own evidence: the picture steadily the field (see football.py) with one
+        # of the overlays coming and going on it, as when a feed keeps only a corner ticker up.
+        field_for = max((t - x.field_since for x in self.extras if getattr(x, "field_since", None) is not None),
+                        default=0.0)
+        backed = (t - self._any_overlay_at <= self.s.overlay_only_return and field_for >= self.s.overlay_only_return)
         confirmed = not self.clock.readable or self.clock.live(t, within=6.0) or (
-            present and mostly_up and not self.clock.half_nearly_over())
+            present and (mostly_up or backed) and not self.clock.half_nearly_over())
         if self._pregame(t):
             confirmed = self.clock.live(t, within=6.0)  # studio graphics stay up too: only the clock
         if self.state == State.BREAK:

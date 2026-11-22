@@ -51,7 +51,7 @@ The detector and game clock are sport-agnostic. `sports.py` maps each league to 
 Edge matching knows *a* scorebug is on screen but not *when* it's from — halftime shows replay first-quarter plays with the old scorebug burned in. So every ~2s the scorebug is read with macOS's built-in text recognition (Vision; local, ~50ms) to get the quarter and clock:
 
 - **Highlights:** a scorebug more than 2½ minutes of game clock behind the furthest point seen is a highlight, not live play. A replay of the play that just happened is within that.
-- **Halftime:** starts at `2ND 0:00`, `HALFTIME`, or when the scorebug vanishes for minutes after the 2nd quarter; it only ends when the scorebug reads the 3rd quarter.
+- **Halftime:** starts at `2ND 0:00`, `HALFTIME`, or when the scorebug vanishes for minutes after the 2nd quarter; it only ends when the scorebug reads the 3rd quarter. A `FLAG` on the scorebug as the half runs out holds it off for 2 minutes (there may be an untimed down), leaving it to the overlays.
 - **Other games:** a scorebug far *ahead* of this game, without this game's team names, is another game's highlight (NFL broadcasts show these).
 - Readings only move the "furthest point" when two in a row agree, so OCR slips don't derail it.
 - **Fallback** when the clock can't be read: halftime (only possible 60–130 min after kickoff) lasts at least 12 min for NFL / 18 min for college, plus 30s of scorebug before it counts as live again.

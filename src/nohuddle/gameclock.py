@@ -6,7 +6,8 @@ quarter and clock gives a "game time elapsed" that only moves forward during liv
 
 - a scorebug showing a time well behind the furthest point seen is a highlight, not live play
   (a replay of the play that just happened stays within the tolerance);
-- "2ND 0:00" / "HALFTIME" starts halftime, and only a 3rd-quarter clock ends it;
+- "2ND 0:00" / "HALFTIME" starts halftime, and only a 3rd-quarter clock ends it - unless a flag
+  is on the scorebug: a penalty as time runs out can mean an untimed down;
 - a scorebug with neither of this game's team names is another game's highlight.
 
 OCR uses macOS's Vision framework (local, ~50ms a frame). Elsewhere it's simply unavailable and
@@ -66,6 +67,7 @@ class Reading:
     next_gen_stats: bool = False  # a "Next Gen Stats" graphic: the NFL's own feed shows them in breaks
     down: bool = False  # a down and distance ("1ST & 10") on the scorebug: the offense is on the field
     countdown: bool = False  # "COUNTDOWN TO 2ND HALF" (halftime) or "... TO KICKOFF": its clock isn't the game's
+    flag: bool = False  # "FLAG" on the scorebug: a penalty
 
     def elapsed(self, period: int) -> int | None:
         """Game seconds elapsed, for periods of `period` seconds (overtime counts on from the end)."""
@@ -149,6 +151,7 @@ def parse(texts: list[Text]) -> Reading:
         if (qm := _quarter_match(t.s.upper())) and (sm := SUBMINUTE_AFTER_QUARTER_RE.match(t.s.upper(), qm.end())):
             if int(sm.group(1)) < 60:
                 clocks.append((t, int(sm.group(1))))
+    r.flag = any(re.search(r"\bFLAG\b", t.s) for t in texts)
     for t in texts:
         up = t.s.upper()
         if "HALFTIME" in up or re.fullmatch(r"\s*HALF\s*", up):
@@ -285,6 +288,9 @@ class ClockSettings:
     half_end_window: float = 120.0  # game seconds before the half in which a long break can be halftime
     halftime_graphic_within: float = 10.0  # game seconds before the half in which "HALFTIME" counts
     half_not_over_slack: int = 5  # a halftime ends on 2nd-quarter time this close to where it stopped
+    # A flag as the half runs out can mean an untimed down: no halftime from the clock until it's
+    # been gone this long (the penalty's sorted out and the down played).
+    flag_hold: float = 120.0
     countdown_memory: float = 30.0  # a lone clock this soon after a countdown is the countdown, word unread
     verdict_ttl: float = 8.0  # how long a single reading's verdict stands
     min_halftime: float = 12 * 60  # fallback when the clock can't be read: NFL ~13 min
@@ -320,6 +326,7 @@ class GameClock:
         self._run_pending: tuple[float, int] | None = None  # a stray reading that may start a new run
         self._quarter: tuple[float, int, int] | None = None  # (wall time, quarter, clock) last read
         self._halftime_hint: float | None = None
+        self.flag_at: float | None = None  # last read a flag in the last seconds of the half
         self.countdown_at: float | None = None  # last read a countdown (see Reading.countdown)
         self.break_panel_at: float | None = None  # last read a "Game Break" screen
         self.next_gen_at: float | None = None  # last read a "Next Gen Stats" graphic
@@ -386,6 +393,13 @@ class GameClock:
             if r.halftime:
                 self._start_halftime(t, by_clock=True)
             return
+        if r.flag and self.max_elapsed is not None and \
+                self._half - self.s.halftime_graphic_within <= self.max_elapsed <= self._half and not self.halftime_done:
+            self.flag_at = t
+            if self.halftime_since is not None and t - self.halftime_since <= self.s.flag_hold:
+                # 2ND 0:00 came up first, then the flag: the half may not be over.
+                self.log.append({"t": round(t, 1), "resync": None, "was": self.max_elapsed, "why": "flag"})
+                self.halftime_since = None
         if r.quarter is None and self.countdown_at is not None and t - self.countdown_at <= self.s.countdown_memory:
             return  # the countdown again, with its word misread: not the game clock
         # The clock decides (2ND 0:00, or a long break at the very end of the half - see
@@ -567,6 +581,8 @@ class GameClock:
             self._start_halftime(t, by_clock=True)
 
     def _start_halftime(self, t: float, by_clock: bool) -> None:
+        if self.flag_at is not None and t - self.flag_at <= self.s.flag_hold:
+            return  # maybe an untimed down to come; until then the overlays decide
         if self.halftime_since is None and not self.halftime_done and \
                 (self.max_elapsed is None or self.max_elapsed <= self._half):
             self.halftime_since = t

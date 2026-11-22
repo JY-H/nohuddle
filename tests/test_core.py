@@ -990,3 +990,80 @@ def test_scorigami_board(tmp_path):
     assert out["distinct"] == len(board.history) + 1
     assert live["now"]["times"] > 0 and 0 <= live["p"] < 0.2  # 17-10 has happened plenty
     assert 0.01 < pre["p"] < 0.04 and not missing["found"]
+
+
+def ticker_over_field(t: float) -> np.ndarray:
+    """Play with the scorebug and logo off; only the corner ticker is up, and as it cycles through
+    other games' scores it only matches every other frame."""
+    return logo_only(t) if int(t) % 2 else field(t)
+
+
+def test_back_from_a_break_on_the_field_with_only_a_corner_overlay(monkeypatch):
+    """From a report (Chiefs-Cardinals, CBS): after a close-up went to break, play resumed with the
+    scorebug and logo off for a minute and only the corner ticker up (matching on and off). With
+    no clock to read and not the whole scorebug, it stayed on the break."""
+    from nohuddle.sports import NFL
+    monkeypatch.setattr(gameclock, "read_text", lambda frame: texts("CHIEFS", "1ST 7:00", "CARDINALS"))
+    det = BreakDetector(read_clock=True, extras=NFL.make_extras())
+    run(det, broadcast, 0, 150)
+    monkeypatch.setattr(gameclock, "read_text", lambda frame: [])
+    assert run(det, scene, 150, 160) == State.BREAK  # a close-up
+    assert run(det, ticker_over_field, 160, 175) == State.LIVE
+    assert run(det, scene, 175, 185) == State.BREAK  # an ad still goes to break
+    det = BreakDetector(read_clock=True, extras=NFL.make_extras())  # ...and an ad with a lookalike
+    monkeypatch.setattr(gameclock, "read_text", lambda frame: texts("CHIEFS", "1ST 7:00", "CARDINALS"))
+    run(det, broadcast, 0, 150)
+    monkeypatch.setattr(gameclock, "read_text", lambda frame: [])
+    run(det, scene, 150, 160)
+    def lookalike_in_ad(t):
+        img = scene(t)
+        if int(t) % 2:
+            cv2.putText(img, "NET", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+        return img
+    assert run(det, lookalike_in_ad, 160, 190) == State.BREAK
+
+
+def test_still_picture_isnt_learned_as_overlays():
+    """From a report: a stream's still "starting soon" slate was learned as a network look (every
+    edge in it persists), and a CBS game matched it through its ads."""
+    from nohuddle.detector import DetectorSettings, OverlayModel
+    persistence = np.zeros((216, 384), np.float32)
+    for y in range(10, 200, 30):  # a title, logos and lettering all over it
+        for x in range(10, 370, 36):
+            cv2.rectangle(persistence, (x, y), (x + 22, y + 18), 1.0, 1)
+    assert not OverlayModel(persistence, DetectorSettings()).regions
+    det = BreakDetector(read_clock=False)
+    run(det, broadcast, 0, 150)
+    assert det.model.regions  # real overlays still are
+
+
+def flag_reading(c, t, *strings):
+    c.update(parse(texts(*strings)), t)
+
+
+def test_flag_as_the_half_runs_out_holds_off_halftime():
+    """From a report (Bills-Dolphins, CBS): the clock hit 2ND 0:00 and the scorebug read HALFTIME,
+    but with a flag: an untimed down was still to come."""
+    assert parse(texts("6", "FLAG", "HALFTIME", "20")).flag
+    c = GameClock()
+    t = feed(c, 2, 20, 0, 20)  # down to 2ND 0:00
+    c.update(reading(2, 0), t)
+    c.update(reading(2, 0), t + 2)
+    assert c.in_halftime(t + 2, 0)
+    flag_reading(c, t + 30, "BILLS", "6", "FLAG", "HALFTIME", "20")  # the flag comes up after
+    flag_reading(c, t + 32, "6", "FLAG", "HALFTIME", "20")
+    assert not c.in_halftime(t + 32, 0)
+    c.update(reading(2, 0), t + 90)  # lining up for the untimed down
+    c.update(reading(2, 0), t + 92)
+    assert not c.in_halftime(t + 92, 0)
+    c.update(reading(2, 0), t + 200)  # the flag's long gone: now the half is over
+    c.update(reading(2, 0), t + 202)
+    assert c.in_halftime(t + 202, 0)
+    # A flag with time still on the clock changes nothing.
+    c = GameClock()
+    t = feed(c, 2, 40, 0, 10)
+    flag_reading(c, t, "FLAG", "2ND 0:30")
+    t = feed(c, 2, 30, t, 30)
+    c.update(reading(2, 0), t)
+    c.update(reading(2, 0), t + 2)
+    assert c.in_halftime(t + 2, 0)

@@ -87,29 +87,38 @@ class FieldOnScreen:
         self._prev: np.ndarray | None = None
         self._game_seen_at: float | None = None
         self._overlay_streak = 0
+        self.field_since: float | None = None  # the picture's been the field since (overlays or not)
+
+    def _graphic(self) -> bool:
+        """A green frame around something else, standing still. (A cut into it is one big change.)"""
+        return (float(np.mean(self._centers)) < self.s.graphic_center and len(self._moves) == self._moves.maxlen
+                and float(np.median(self._moves)) < self.s.graphic_still)
 
     def observe(self, frame_bgr: np.ndarray, *, any_overlay: bool, clearly_game: bool, live: bool, t: float) -> bool:
         self._overlay_streak = self._overlay_streak + 1 if any_overlay else 0
         if clearly_game or self._overlay_streak >= self.s.back_after:
             self._game_seen_at = t
         prev, self._prev = self._prev, frame_bgr
-        if any_overlay:
-            for d in (self._shares, self._lines, self._centers, self._moves):
-                d.clear()
-            return False
-        if self._game_seen_at is None:
-            return False
+        # Keep measuring through overlay frames: a small overlay that comes and goes (a corner
+        # ticker cycling other games' scores, with the scorebug off) must not restart the average.
         share, center, moved = green_layout(frame_bgr, prev)
         self._shares.append(share)
         self._centers.append(center)
         if moved is not None:
             self._moves.append(moved)
+        on_field = len(self._shares) == self._shares.maxlen and float(np.mean(self._shares)) >= self.s.share \
+            and not self._graphic()
+        self.field_since = (self.field_since or t) if on_field else None
+        if any_overlay:
+            self._lines.clear()
+            return False  # the overlay already says it's the game
+        if self._game_seen_at is None:
+            return False
         if len(self._shares) < self._shares.maxlen or float(np.mean(self._shares)) < self.s.share:
             self._lines.clear()
             return False
-        if (float(np.mean(self._centers)) < self.s.graphic_center and len(self._moves) == self._moves.maxlen
-                and float(np.median(self._moves)) < self.s.graphic_still):  # (a cut into it is one big change)
-            return False  # a green frame around something else, standing still: a graphic
+        if self._graphic():
+            return False
         if t - self._game_seen_at <= self.s.cap:
             return True
         self._lines.append(yard_lines(frame_bgr))  # only needed past the cap
