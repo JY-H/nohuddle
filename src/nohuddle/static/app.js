@@ -121,16 +121,21 @@ function renderStage() {
   }
 
   const empty = state.games.length > 0 && state.visible.length === 0;
-  $('#empty').hidden = !empty;
-  // The break screen's tabs: the runner game, and (with NFL games on) the scorigami watch.
+  // The break screen's tabs: the runner game, and (with NFL games on) the scorigami watch, which
+  // can also be brought up over the games while they play.
   const nfl = state.games.some((g) => g.league === 'nfl');
-  const pane = nfl ? breakPane : 'runner';
-  $('#break-tabs').hidden = !nfl;
+  const overlay = scorigamiOpen && nfl && !empty;
+  const pane = overlay ? 'scorigami' : nfl ? breakPane : 'runner';
+  $('#empty').hidden = !empty && !overlay;
+  $('#empty').classList.toggle('overlay', overlay);
+  $('#scorigami-toggle').hidden = !nfl;
+  $('#scorigami-toggle').classList.toggle('on', overlay);
+  $('#break-tabs').hidden = !nfl || overlay;
   for (const b of document.querySelectorAll('#break-tabs button')) b.classList.toggle('on', b.dataset.pane === pane);
   $('#runner').hidden = pane !== 'runner';
   $('#scorigami').hidden = pane !== 'scorigami';
   Runner.setActive(empty && pane === 'runner');
-  watchScorigami(empty && pane === 'scorigami');
+  watchScorigami((empty || overlay) && pane === 'scorigami');
   if (empty) {
     const solo = state.games.length === 1 ? state.games[0] : null;
     const why = solo && { halftime: 'Halftime', highlight: 'Showing highlights', 'other game': 'Showing another game' }[solo.detail];
@@ -148,7 +153,13 @@ function renderStage() {
 
 // ---------- scorigami ----------
 
-let breakPane = localStorage.getItem('break-pane') || 'runner', scorigamiTimer = null;
+let breakPane = localStorage.getItem('break-pane') || 'runner', scorigamiTimer = null, scorigamiOpen = false;
+function toggleScorigami(open = !scorigamiOpen) {
+  scorigamiOpen = open;
+  if (open) { breakPane = 'scorigami'; localStorage.setItem('break-pane', breakPane); }  // a break keeps it up
+  if (state) renderStage();
+}
+$('#scorigami-toggle').onclick = () => toggleScorigami();
 document.querySelector('#break-tabs').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-pane]');
   if (!b) return;
@@ -622,6 +633,7 @@ $('#dbg-copy').onclick = async () => {
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && debugId) return closeDebug();
+  if (e.key === 'Escape' && scorigamiOpen) return toggleScorigami(false);
   if (e.target.matches('input, select, textarea')) return;
   if ((e.key === 'd' || e.key === 'D') && state?.active) return openDebug(state.active);
   if (e.key === 's' || e.key === 'S') document.body.classList.toggle('panel-hidden');
@@ -630,6 +642,7 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'a' || e.key === 'A') post('/api/pin', { id: null });
   else if (e.key === 'b' || e.key === 'B') toggleDrawer();
   else if (e.key === 'c' || e.key === 'C') toggleFantasy();
+  else if ((e.key === 'g' || e.key === 'G') && state?.games.some((g) => g.league === 'nfl')) toggleScorigami();
   else if (/^[1-9]$/.test(e.key) && state.games[+e.key - 1]) post('/api/pin', { id: state.games[+e.key - 1].id });
 });
 

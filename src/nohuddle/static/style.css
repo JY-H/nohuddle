@@ -26,6 +26,10 @@ body.single .tile-label:hover span { opacity: 1; }
 #empty h1 { color: var(--text); font-weight: 600; margin: 0 0 4px; }
 #empty ul { list-style: none; padding: 0; margin-top: 16px; }
 #empty li { padding: 2px 0; }
+/* The scorigami watch brought up over games that are playing. */
+#empty.overlay { z-index: 5; background: rgba(11, 13, 16, .9); }
+#empty.overlay > :is(h1, p, ul) { display: none; }
+#empty.overlay #scorigami { max-height: calc(100vh - 60px); }
 .break-tabs { display: flex; gap: 4px; margin-top: 20px; }
 .break-tabs button { font-size: 12px; padding: 2px 10px; }
 .break-tabs button.on { border-color: var(--accent); color: var(--accent); }
@@ -137,6 +141,9 @@ body.resizing #stage iframe { transition: none; }
 .tile-label.drawer-tile .tile-dbg { top: auto; bottom: 4px; right: 4px; }
 
 #fantasy-toggle { position: absolute; z-index: 6; right: 96px; top: 8px; opacity: 0; transition: opacity .2s; }
+#scorigami-toggle { position: absolute; z-index: 6; right: 144px; top: 8px; opacity: 0; transition: opacity .2s; }
+#stage:hover #scorigami-toggle { opacity: .8; }
+#scorigami-toggle.on { opacity: .8; border-color: var(--accent); }
 #stage:hover #fantasy-toggle { opacity: .8; }
 #fantasy-toggle.on { opacity: .8; border-color: var(--accent); }
 #fantasy { width: 360px; flex: none; display: flex; flex-direction: column; background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; }

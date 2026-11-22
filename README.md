@@ -18,9 +18,9 @@ Needs [uv](https://docs.astral.sh/uv/) and Google Chrome (the app drives your in
 - **It's a break** / **Not a break** fix a wrong call. "Not a break" on a detected break makes it relearn that game.
 - **Source** picks a mirror; the app also switches mirrors itself when a stream is laggy or dead.
 - 🏈 / `C` opens a drawer with your ESPN fantasy football matchup (live points and projections, both lineups). **Open on ESPN** opens ESPN's own Fantasycast in a tab.
-- **Scorigami** (NFL): for each game on the watchlist, whether the score would be a [scorigami](https://nflscorigami.com/) (a final score that's never happened) if it ended now, and the chance it ends on one. See [Scorigami](#scorigami).
+- **Scorigami** (NFL; 📊 / `G` any time, `Esc` closes, or the tab on the break screen): for each game on the watchlist, whether the score would be a [scorigami](https://nflscorigami.com/) (a final score that's never happened) if it ended now, and the chance it ends on one. See [Scorigami](#scorigami).
 - 👁 shows what the detector sees (green = overlay visible, red = learned but not visible).
-- Keys: `S` panel, `M` single/multi, `F` fullscreen.
+- Keys: `S` panel, `M` single/multi, `F` fullscreen, `G` scorigami.
 
 Settings, the watchlist, learned overlays, the learned network library, saved reports and the app's Chrome profile live in `data/` in the checkout (gitignored; it holds your stream site and broadcast frames, so keep it out of git). Set `NOHUDDLE_DATA` to use another folder; installed elsewhere, the default is `~/.config/nohuddle/`.
 
