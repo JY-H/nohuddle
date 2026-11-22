@@ -1067,3 +1067,22 @@ def test_flag_as_the_half_runs_out_holds_off_halftime():
     c.update(reading(2, 0), t)
     c.update(reading(2, 0), t + 2)
     assert c.in_halftime(t + 2, 0)
+
+
+def boxed_logo_broadcast(t: float) -> np.ndarray:
+    img = broadcast(t)
+    cv2.rectangle(img, (520, 14), (625, 34), (255, 255, 255), 2)  # a logo in a wide box, like FOX's
+    cv2.putText(img, "FOX", (550, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    return img
+
+
+def test_letterbox_edge_isnt_a_boxed_logo():
+    """From a report (Cowboys-Titans, FOX): a letterboxed ad's black bar ended right across the
+    FOX logo's box, matching it frame after frame, and brought the game back mid-ad."""
+    det = BreakDetector(read_clock=False)
+    run(det, boxed_logo_broadcast, 0, 150)
+    logo = next(i for i, (x, y, w, h) in enumerate(det.model.boxes()) if x > 300 and y < 20)
+    ad = (scene(0) // 6 + 30).astype(np.uint8)  # a dark scene...
+    ad[:14] = ad[-14:] = 0  # ...letterboxed
+    assert det.model.scores(preprocess(ad))[logo] < det.s.region_match
+    assert det.model.scores(preprocess(boxed_logo_broadcast(150)))[logo] >= det.s.region_match

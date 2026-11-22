@@ -114,6 +114,26 @@ def edges(grey: np.ndarray) -> np.ndarray:
     return cv2.Canny(grey, 30, 90) > 0
 
 
+BAR_BLACK = 20  # brightest pixel in a row (or column) of a letterbox bar
+BAR_MIN = 4  # rows (or columns) of black before it counts as a bar
+
+
+def bar_edges(grey: np.ndarray) -> np.ndarray:
+    """Where a letterboxed (or pillarboxed) picture meets its black bars. Ads are often
+    letterboxed and the broadcast never is, and that long straight edge can line up with a boxed
+    logo's outline (FOX's) well enough to pass for it."""
+    out = np.zeros(grey.shape, bool)
+    for black, view in ((grey.max(axis=1) <= BAR_BLACK, out), (grey.max(axis=0) <= BAR_BLACK, out.T)):
+        if black.all():
+            continue  # a black frame: no edges anyway
+        lead, trail = int(np.argmin(black)), int(np.argmin(black[::-1]))  # bar rows from each side
+        if lead >= BAR_MIN:
+            view[:lead + 2] = True
+        if trail >= BAR_MIN:
+            view[len(black) - trail - 2:] = True
+    return out
+
+
 class OverlayModel:
     """Persistent-overlay regions, from a map of how often each pixel is an edge."""
 
@@ -152,7 +172,8 @@ class OverlayModel:
         Correlating the *shape* (rather than counting edge pixels) keeps busy scenes - water,
         trees, crowds - from looking like an overlay just because they're full of edges.
         """
-        e = cv2.GaussianBlur(edges(grey).astype(np.float32), (0, 0), 1.0)
+        e = edges(grey) & ~bar_edges(grey)
+        e = cv2.GaussianBlur(e.astype(np.float32), (0, 0), 1.0)
         out = []
         for rows, cols, t in self.regions:
             cur = e[rows, cols] - e[rows, cols].mean()
