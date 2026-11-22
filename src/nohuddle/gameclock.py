@@ -6,8 +6,9 @@ quarter and clock gives a "game time elapsed" that only moves forward during liv
 
 - a scorebug showing a time well behind the furthest point seen is a highlight, not live play
   (a replay of the play that just happened stays within the tolerance);
-- "2ND 0:00" / "HALFTIME" starts halftime, and only a 3rd-quarter clock ends it - unless a flag
-  is on the scorebug: a penalty as time runs out can mean an untimed down;
+- "2ND 0:00" / "HALFTIME" starts halftime, and only a 3rd-quarter clock ends it (not one read in its
+  first minutes: that's another game's highlight) - unless a flag is on the scorebug: a penalty as
+  time runs out can mean an untimed down;
 - a scorebug with neither of this game's team names is another game's highlight.
 
 OCR uses macOS's Vision framework (local, ~50ms a frame). Elsewhere it's simply unavailable and
@@ -133,7 +134,9 @@ def parse(texts: list[Text]) -> Reading:
     if any(NEXT_GEN_RE.search(t.s) for t in texts):
         return Reading(next_gen_stats=True)  # a stats graphic: nothing on it is the game clock
     joined = " | ".join(t.s for t in texts)
-    if COUNTDOWN_RE.search(joined):
+    # CBS's pregame corner: "KICKOFF 7:04", with no quarter - a countdown too.
+    kickoff = KICKOFF_RE.search(joined) and not any(_quarter_in(t.s) is not None for t in _drop_down_and_distance(texts))
+    if COUNTDOWN_RE.search(joined) or kickoff:
         return Reading(countdown=True, halftime=not KICKOFF_RE.search(joined))
     downs = {int(m.group(0)[0]) for t in texts for m in DOWN_DISTANCE_RE.finditer(t.s)}
     r.down = bool(downs)
@@ -235,9 +238,11 @@ def network_votes(texts: list[str]) -> Counter:
 
 try:
     import objc
-    import Quartz
-    import Vision
     from Foundation import NSData
+    # Bound here, once: pyobjc looks names up lazily, and two OCR threads doing that at the same
+    # time can fail (KeyError in its lazy importer).
+    from Quartz import CGImageSourceCreateImageAtIndex, CGImageSourceCreateWithData
+    from Vision import VNImageRequestHandler, VNRecognizeTextRequest, VNRequestTextRecognitionLevelAccurate
 
     OCR_AVAILABLE = True
 except ImportError:  # not macOS / pyobjc missing
@@ -252,12 +257,12 @@ def read_text(frame_bgr: np.ndarray) -> list[Text]:
         return []
     with objc.autorelease_pool():
         data = NSData.dataWithBytes_length_(png.tobytes(), len(png))
-        src = Quartz.CGImageSourceCreateWithData(data, None)
-        img = Quartz.CGImageSourceCreateImageAtIndex(src, 0, None)
-        req = Vision.VNRecognizeTextRequest.alloc().init()
-        req.setRecognitionLevel_(Vision.VNRequestTextRecognitionLevelAccurate)
+        src = CGImageSourceCreateWithData(data, None)
+        img = CGImageSourceCreateImageAtIndex(src, 0, None)
+        req = VNRecognizeTextRequest.alloc().init()
+        req.setRecognitionLevel_(VNRequestTextRecognitionLevelAccurate)
         req.setUsesLanguageCorrection_(False)
-        handler = Vision.VNImageRequestHandler.alloc().initWithCGImage_options_(img, None)
+        handler = VNImageRequestHandler.alloc().initWithCGImage_options_(img, None)
         handler.performRequests_error_([req], None)
         out = []
         for obs in req.results() or []:
@@ -294,6 +299,9 @@ class ClockSettings:
     countdown_memory: float = 30.0  # a lone clock this soon after a countdown is the countdown, word unread
     verdict_ttl: float = 8.0  # how long a single reading's verdict stands
     min_halftime: float = 12 * 60  # fallback when the clock can't be read: NFL ~13 min
+    # No 2nd half before this share of min_halftime: a 3rd-quarter clock sooner than that is another
+    # game's highlight in the halftime show. (Halftime can be noticed up to ~5 min late, after a long break.)
+    halftime_floor: float = 2 / 3
     halftime_resume_scorebug: float = 30.0  # ...and the scorebug back this long
     max_halftime: float = 35 * 60  # give up on a halftime that never ends (missed the 3rd-qtr read)
     min_team_readings: int = 15  # readings needed before trusting the learned team names
@@ -434,6 +442,13 @@ class GameClock:
             return
         if e > possible:
             return  # further along than the game can be yet: a misread (e.g. down-and-distance)
+        if (self.halftime_since is not None and r.quarter is not None and r.quarter > self.s.periods_per_half
+                and t - self.halftime_since < self.s.halftime_floor * self.s.min_halftime
+                and (self.countdown_at is None or self.countdown_at < self.halftime_since)):
+            # Too soon for the 2nd half (unless a countdown to it was on screen): halftime shows run
+            # other games' highlights.
+            self._verdict = (t, "other game")
+            return
         self.readable = True
         self._quarter = (t, r.quarter, r.clock)
         run_for = self._extend_run(t, e)

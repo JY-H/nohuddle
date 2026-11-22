@@ -347,6 +347,19 @@ def test_clock_halftime_until_third_quarter():
 
 
 
+def test_other_games_third_quarter_in_the_halftime_show_doesnt_end_halftime():
+    """From a report: 6 minutes into halftime, the halftime show ran a Lions highlight with its
+    "3RD 9:11" clock running; that ended halftime and the show played as the game."""
+    c = GameClock()
+    t = feed(c, 2, 10, 0, 12)
+    c.update(reading(2, 0), t)
+    c.update(reading(2, 0), t + 2)
+    feed(c, 3, 551, t + 390, 10)  # the highlight, clock running
+    assert c.in_halftime(t + 400, 0) and not c.live(t + 400) and c.max_elapsed == 1800
+    feed(c, 3, 900, t + 840, 10)  # the real 3rd quarter
+    assert not c.in_halftime(t + 850, 4) and c.live(t + 850)
+
+
 def test_halftime_ends_when_the_third_quarter_clock_has_started():
     """From a report: after the kickoff the Q3 clock read 14:57, 14:56, 14:54 - never seen running
     3 seconds - and halftime never ended."""
@@ -1086,3 +1099,18 @@ def test_letterbox_edge_isnt_a_boxed_logo():
     ad[:14] = ad[-14:] = 0  # ...letterboxed
     assert det.model.scores(preprocess(ad))[logo] < det.s.region_match
     assert det.model.scores(preprocess(boxed_logo_broadcast(150)))[logo] >= det.s.region_match
+
+
+def test_kickoff_countdown_isnt_the_game_clock():
+    """From a report (Giants-Jaguars, CBS): the pregame show's "KICKOFF 7:04" corner was read as the
+    game clock (overtime, in fact), so the studio show was shown as live and learned as overlays."""
+    show = [("KICKOFF", "{}", "RAIDERS", "BCBS SPORTS", "WEEK 11", "BRONCOS"), ("KICKOFF", "{}", "DCBS SPORTS", "NFL WEEK11")]
+    c = GameClock()
+    for i in range(60):
+        left = 424 - 2 * i
+        r = parse(texts(*(x.format(f"{left // 60}:{left % 60:02d}") for x in show[i % 2])))
+        assert r.countdown and not r.halftime and r.clock is None
+        c.update(r, i * 2.0)
+    assert not c.readable and c.max_elapsed is None
+    r = parse(texts("KICKOFF", "1ST 15:00", "GIANTS", "JAGUARS"))  # a scorebug saying so has its quarter
+    assert not r.countdown and (r.quarter, r.clock) == (1, 900)
