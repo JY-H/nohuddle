@@ -1101,6 +1101,15 @@ def test_letterbox_edge_isnt_a_boxed_logo():
     assert det.model.scores(preprocess(boxed_logo_broadcast(150)))[logo] >= det.s.region_match
 
 
+def test_espn_small_first_quarter_is_read():
+    """From a report (Commanders-Bengals, ESPN MNF): the quarter on ESPN's new scorebug read as
+    "f3r"/"fsr"/"fet", so the clock was never readable and live play went to a break."""
+    for q in ("f3r", "fsr", "fet", "feT", "f8r", "fer"):
+        r = parse([Text("1ER", 0.28, 0.92), Text(q, 0.45, 0.94), Text("1st & 10", 0.5, 0.9), Text("10:07 40", 0.52, 0.94)])
+        assert (r.quarter, r.clock) == (1, 607), q
+    assert parse(texts("FERRARI", "10:07")).quarter is None
+
+
 def test_kickoff_countdown_isnt_the_game_clock():
     """From a report (Giants-Jaguars, CBS): the pregame show's "KICKOFF 7:04" corner was read as the
     game clock (overtime, in fact), so the studio show was shown as live and learned as overlays."""

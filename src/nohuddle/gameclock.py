@@ -98,6 +98,8 @@ def _quarter_in(s: str) -> int | None:
 
 # OCR sometimes returns Cyrillic look-alikes ("1Sт", "25РЛ"); map them to Latin first.
 LOOKALIKES = str.maketrans("тТоОрРнНаАеЕсСвВмМкКхХуУ", "TTOOPPHHAAEECCBBMMKKXXYY")
+# ESPN's scorebug prints the quarter small, "1" and a raised "st": OCR reads "f3r", "fsr", "fet".
+ESPN_FIRST_RE = re.compile(r"(?<![A-Z0-9])F[SE38][RT](?![A-Z0-9])")
 # Down and distance ("1ST & 10"), including OCR's "1ST 8.10" (& read as 8). Only treated as such
 # when a real clock is elsewhere on screen, since "2ND 8.47" can also be a misread clock.
 DOWN_DISTANCE_RE = re.compile(r"(?<!\d)[1-4]\s*(?:ST|ND|RD|TH|S[T7]|N[D0O]|R[D0O])\W{0,2}(?:&|8|\$|S(?=\W))\W{0,2}(?:\d{1,2}|GOAL|GL)\b")  # "&" is often read as "8", "$", "S"
@@ -127,7 +129,7 @@ KICKOFF_RE = re.compile(r"KICK\s*OFF")
 def parse(texts: list[Text]) -> Reading:
     """Turn recognised text into a reading. Pairs the quarter with the clock next to it."""
     r = Reading()
-    texts = [Text(t.s.translate(LOOKALIKES).upper(), t.x, t.y) for t in texts]
+    texts = [Text(ESPN_FIRST_RE.sub("1ST", t.s.translate(LOOKALIKES).upper()), t.x, t.y) for t in texts]
     if any(BREAK_PANEL_RE.search(t.s) for t in texts):
         # The scorebug in the panel's corner is the game's, but frozen for the break: not live.
         return Reading(break_panel=True)
