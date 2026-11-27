@@ -1050,6 +1050,32 @@ def test_still_picture_isnt_learned_as_overlays():
     assert det.model.regions  # real overlays still are
 
 
+def test_faint_logo_is_learned():
+    """From a report (Bills-Chiefs, NBC): the peacock's edges persisted in only 50-80% of frames, so
+    just 16 pixels made the cut and the logo wasn't learned. Touchdown replays have no scorebug, so
+    with only the scorebug learned they were taken for a break."""
+    from nohuddle.detector import DetectorSettings, OverlayModel, edges
+    def logo(img):
+        cv2.circle(img, (600, 30), 14, (40, 200, 240), 3)
+        cv2.ellipse(img, (600, 30), (6, 12), 0, 0, 360, (200, 40, 160), 3)
+        return img
+    plain = np.full((360, 640, 3), 90, np.uint8)
+    cv2.rectangle(plain, (150, 300), (490, 340), (20, 20, 20), -1)
+    cv2.putText(plain, "DUKE 3  2ND  MIAMI 9", (160, 330), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+    bug = edges(preprocess(plain))
+    mark = edges(preprocess(logo(np.zeros((360, 640, 3), np.uint8))))
+    persistence = np.where(bug, 0.9, 0.1).astype(np.float32)
+    persistence[mark] = 0.6
+    ys, xs = np.nonzero(mark)
+    persistence[ys[::len(ys) // 10], xs[::len(xs) // 10]] = 0.75  # only ~10 pixels make the cut
+    model = OverlayModel(persistence, DetectorSettings())
+    assert len(model.regions) >= 2
+    rows, cols, _ = model.regions[model.primary]
+    assert rows.start > 150  # the scorebug, not the logo
+    scores = model.scores(preprocess(logo(field(1))))  # a replay: logo, no scorebug
+    assert max(scores) >= DetectorSettings().region_match
+    assert max(model.scores(preprocess(field(2)))) < DetectorSettings().region_match
+
 def flag_reading(c, t, *strings):
     c.update(parse(texts(*strings)), t)
 

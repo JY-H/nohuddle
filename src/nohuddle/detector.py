@@ -51,6 +51,9 @@ class DetectorSettings:
     edge_persistence: float = 0.7  # share of history frames a pixel must be an edge in
     region_match: float = 0.35  # correlation with the learned edge pattern needed to count as present
     min_region_px: int = 20  # persistent edge pixels needed for a region
+    # A logo too faint for that (NBC's colour peacock: its edges persist in 50-80% of frames) still
+    # counts if its edges at this share of edge_persistence join up with a few that make it.
+    faint_persistence: float = 0.7
     max_region_area: float = 0.15  # bounding box larger than this share of the frame = scenery
     # All regions together covering more than this isn't overlays but a still picture (a stream's
     # "starting soon" slate): every edge in it persists. Real overlays measured <=0.12.
@@ -139,24 +142,37 @@ class OverlayModel:
 
     def __init__(self, persistence: np.ndarray, s: DetectorSettings, threshold: float | None = None):
         self.persistence = persistence.astype(np.float32)
-        mask = self.persistence >= (s.edge_persistence if threshold is None else threshold)
-        mask[:3, :] = mask[-3:, :] = mask[:, :3] = mask[:, -3:] = False  # player borders
+        # A network look (an average over games, with its own threshold) keeps only what's strong in
+        # it: faint there is one game's team logo, or scenery.
+        faint_share = s.faint_persistence if threshold is None else 1.0
+        threshold = s.edge_persistence if threshold is None else threshold
+        mask = self.persistence >= threshold
+        # Faint edges joined to strong ones (see faint_persistence).
+        _, faint_labels = cv2.connectedComponents((self.persistence >= threshold * faint_share).astype(np.uint8))
+        joined = np.unique(faint_labels[mask])
+        faint = np.isin(faint_labels, joined[joined > 0])
+        for m in (mask, faint):
+            m[:3, :] = m[-3:, :] = m[:, :3] = m[:, -3:] = False  # player borders
 
-        # Merge nearby edge pixels (letters of one scorebug, one logo) into regions.
-        grouped = cv2.dilate(mask.astype(np.uint8), np.ones((7, 7), np.uint8))
-        n, _labels, stats, _ = cv2.connectedComponentsWithStats(grouped)
         template = cv2.GaussianBlur(self.persistence, (0, 0), 1.0)
         self.regions: list[tuple[slice, slice, np.ndarray]] = []  # (rows, cols, zero-mean template)
         sizes = []
-        for label in range(1, n):
-            x, y, w, h, _area = stats[label]
-            size = int(mask[y:y + h, x:x + w].sum())
-            if w * h > s.max_region_area * W * H or size < s.min_region_px:
-                continue
-            rows, cols = slice(y, y + h), slice(x, x + w)
-            t = template[rows, cols] - template[rows, cols].mean()
-            self.regions.append((rows, cols, t / (np.linalg.norm(t) + 1e-6)))
-            sizes.append(size)
+        for m, is_faint in ((mask, False), (faint, True)):
+            # Merge nearby edge pixels (letters of one scorebug, one logo) into regions.
+            grouped = cv2.dilate(m.astype(np.uint8), np.ones((7, 7), np.uint8))
+            n, _labels, stats, _ = cv2.connectedComponentsWithStats(grouped)
+            for label in range(1, n):
+                x, y, w, h, _area = stats[label]
+                size = int(m[y:y + h, x:x + w].sum())
+                if w * h > s.max_region_area * W * H or size < s.min_region_px:
+                    continue
+                rows, cols = slice(y, y + h), slice(x, x + w)
+                if is_faint and any(rows.start < r.stop and r.start < rows.stop and cols.start < c.stop
+                                    and c.start < cols.stop for r, c, _ in self.regions):
+                    continue  # part of a region already found: only new (faint) logos are added
+                t = template[rows, cols] - template[rows, cols].mean()
+                self.regions.append((rows, cols, t / (np.linalg.norm(t) + 1e-6)))
+                sizes.append(0 if is_faint else size)  # never the scorebug
         if sum((r.stop - r.start) * (c.stop - c.start) for r, c, _ in self.regions) > s.max_overlay_area * W * H:
             self.regions, sizes = [], []
         # The biggest overlay is the scorebug; the others are logos and the like.

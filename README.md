@@ -29,7 +29,7 @@ Settings, the watchlist, learned overlays, the learned network library, saved re
 Live broadcasts have graphics composited over the picture: the scorebug, the network logo, down-and-distance boxes. Commercials don't. Every network's graphics look different and any one can disappear for a while (ESPN hides the scorebug during some plays; stat graphics and replays cover it), so rather than hard-coding templates, each game learns its own:
 
 1. Every 4s a frame goes into a ~10 minute history (break frames excluded, so long ad breaks can't wash the model out).
-2. Pixels that are an **edge in ≥70% of frames** are overlay outlines — even translucent logos keep their edges, while moving scenery doesn't.
+2. Pixels that are an **edge in ≥70% of frames** are overlay outlines — even translucent logos keep their edges, while moving scenery doesn't. A fainter logo (NBC's colour peacock, ~50%) counts too when some of it makes 70%.
 3. Those pixels are grouped into regions; each frame, each region's edge pattern is **correlated** with the current edges (busy ad scenes don't correlate with a logo's shape).
 4. **Any** region matching = broadcast. All gone (scorebug *and* logo) for 3s = **break**; back for 2s = **live**.
 5. The largest region is the scorebug. If only the logo has been there for 2+ minutes, it's an **intermission** (halftime show) and counts as a break. Minutes with no overlays at all also count as a break.
